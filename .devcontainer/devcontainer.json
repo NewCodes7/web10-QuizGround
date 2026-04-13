@@ -4,7 +4,8 @@
   "service": "workspace",
   "workspaceFolder": "/workspaces/web10-QuizGround",
   "shutdownAction": "stopCompose",
-  "remoteUser": "vscode",
+  "remoteUser": "node",
+  "postCreateCommand": "npm i -g @openai/codex && curl -fsSL https://claude.ai/install.sh | bash",
   "customizations": {
     "vscode": {
       "extensions": [
