@@ -1,4 +1,4 @@
-import { IsNumber, IsString, Length } from 'class-validator';
+import { IsNumber, IsString, Length, Min } from 'class-validator';
 
 export class RetransmitPositionDto {
   @IsString()
@@ -6,5 +6,6 @@ export class RetransmitPositionDto {
   gameId: string;
 
   @IsNumber()
+  @Min(0, { message: 'lastSeq는 0 이상이어야 합니다.' })
   lastSeq: number;
 }

@@ -75,7 +75,8 @@ export class GameGateway {
     @MessageBody() dto: RetransmitPositionDto,
     @ConnectedSocket() client: Socket
   ): Promise<void> {
-    await this.positionBroadcastService.handleRetransmit(dto.gameId, dto.lastSeq, client);
+    // TICKET-001: pass playerId so handleRetransmit can validate room membership
+    await this.positionBroadcastService.handleRetransmit(dto, client.data.playerId, client);
   }
 
   @SubscribeMessage(SocketEvents.CHAT_MESSAGE)
@@ -143,6 +144,10 @@ export class GameGateway {
     this.gameChatService.subscribeChatEvent(this.server).then(() => {
       this.logger.verbose('Redis Chat 이벤트 등록 완료했어요!');
     });
+
+    // Position batch timer slots 시작 (TICKET-003/007)
+    this.positionBroadcastService.initTimers(this.server);
+    this.logger.verbose('Position broadcast timer slots 초기화 완료했어요!');
 
     this.server.server.engine.on('headers', (headers, request) => {
       this.initialHeaders(headers, request);

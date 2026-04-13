@@ -32,6 +32,14 @@ socketService.on('joinRoom', (data) => {
   }));
   addPlayers(newPlayers);
 
+  // TICKET-008: 방 입장 시 seq 상태 초기화 (이전 방 또는 재입장 시 stale 상태 방지)
+  const gameId = useRoomStore.getState().gameId;
+  if (gameId) {
+    roomSeqMap.delete(gameId);
+    retransmitPending.delete(gameId);
+  }
+  playerAppliedSeqMap.clear();
+
   // 현재 플레이어 이름이 없다면
   if (!currentPlayerName && currentPlayerId) {
     const me = data.players.find((e) => e.playerId == currentPlayerId);
@@ -43,6 +51,8 @@ socketService.on('joinRoom', (data) => {
 const roomSeqMap = new Map<string, number>();
 // 플레이어 단위 마지막으로 적용된 seq 추적 (재전송 중복 적용 방지)
 const playerAppliedSeqMap = new Map<string, number>();
+// 방 단위 재전송 요청 in-flight 여부 (TICKET-008: 중복 요청 방지)
+const retransmitPending = new Set<string>();
 
 socketService.on('updatePosition', (data) => {
   // 신규 포맷: { seq, updates: [{playerId, playerPosition}] }
@@ -59,10 +69,15 @@ socketService.on('updatePosition', (data) => {
     const gameId = useRoomStore.getState().gameId;
     if (gameId) {
       const last = roomSeqMap.get(gameId) ?? 0;
-      if (last > 0 && seq > last + 1) {
+      // TICKET-008: gap 감지 시 pending이 없을 때만 재전송 요청
+      if (last > 0 && seq > last + 1 && !retransmitPending.has(gameId)) {
+        retransmitPending.add(gameId);
         socketService.emit('retransmitPosition', { gameId, lastSeq: last });
       }
-      roomSeqMap.set(gameId, seq);
+      // TICKET-008: 오래된 패킷이 더 새 seq를 덮어쓰지 않도록 max 적용
+      if (seq > last) {
+        roomSeqMap.set(gameId, seq);
+      }
     }
   }
 
@@ -75,15 +90,20 @@ socketService.on('updatePosition', (data) => {
 socketService.on('positionRetransmitResponse', (data) => {
   const gameId = useRoomStore.getState().gameId;
   if (gameId) {
+    // TICKET-008: 응답 수신 시 pending 해제
+    retransmitPending.delete(gameId);
     roomSeqMap.set(gameId, Math.max(roomSeqMap.get(gameId) ?? 0, data.seq));
   }
-  (data.updates ?? []).forEach((e: { playerId: string; playerPosition: [number, number]; appliedSeq: number }) => {
-    const currentApplied = playerAppliedSeqMap.get(e.playerId) ?? 0;
-    if (e.appliedSeq > currentApplied) {
-      playerAppliedSeqMap.set(e.playerId, e.appliedSeq);
-      usePlayerStore.getState().updatePlayerPosition(e.playerId, e.playerPosition);
+  (data.updates ?? []).forEach(
+    (e: { playerId: string; playerPosition: [number, number]; appliedSeq: number }) => {
+      const currentApplied = playerAppliedSeqMap.get(e.playerId) ?? 0;
+      // TICKET-008: 더 최신 업데이트를 덮어쓰지 않도록 appliedSeq 비교
+      if (e.appliedSeq > currentApplied) {
+        playerAppliedSeqMap.set(e.playerId, e.appliedSeq);
+        usePlayerStore.getState().updatePlayerPosition(e.playerId, e.playerPosition);
+      }
     }
-  });
+  );
 });
 
 socketService.on('endQuizTime', (data) => {
@@ -202,4 +222,6 @@ socketService.on('disconnect', () => {
   useQuizStore.getState().reset();
   roomSeqMap.clear();
   playerAppliedSeqMap.clear();
+  // TICKET-008: disconnect 시 pending 상태도 초기화
+  retransmitPending.clear();
 });

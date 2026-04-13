@@ -14,5 +14,11 @@ export const REDIS_KEY = {
 
   ACTIVE_ROOMS: 'ActiveRooms', // 활성화된 방 목록을 저장하는 Set (핀번호 중복 체크하기 위함)
 
-  POSITION_CHANNEL: (gameId: string) => `position:${gameId}`
+  POSITION_CHANNEL: (gameId: string) => `position:${gameId}`,
+
+  // 방 단위 authoritative seq (INCR, TICKET-004)
+  ROOM_SEQ: (gameId: string) => `Room:${gameId}:Seq`,
+
+  // 최근 N개 배치 로그 — Redis List (RPUSH/LTRIM, TICKET-006)
+  ROOM_POSITION_LOG: (gameId: string) => `Room:${gameId}:PositionLog`
 };

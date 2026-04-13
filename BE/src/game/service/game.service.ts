@@ -14,6 +14,7 @@ import { parseHeaderToObject } from '../../common/utils/utils';
 import { GameRoomService } from './game.room.service';
 import { SetPlayerNameDto } from '../dto/set-player-name.dto';
 import { Trace, TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
+import { PositionBroadcastService } from './position-broadcast.service';
 
 @TraceClass()
 @Injectable()
@@ -25,7 +26,8 @@ export class GameService {
     private readonly gameValidator: GameValidator,
     private readonly quizCacheService: QuizCacheService,
     private readonly redisSubscriberService: RedisSubscriberService,
-    private readonly gameRoomService: GameRoomService
+    private readonly gameRoomService: GameRoomService,
+    private readonly positionBroadcastService: PositionBroadcastService
   ) {}
 
   async updatePosition(updatePosition: UpdatePositionDto, clientId: string): Promise<void> {
@@ -40,22 +42,15 @@ export class GameService {
       playerGameId?.toString()
     );
 
-    // 2. 위치 저장 + position 채널 publish를 파이프라인으로 처리
-    const message = JSON.stringify({
+    // 2. 서버 로컬 배치 큐에 적재 (TICKET-003)
+    // Redis 즉시 write/publish 대신 50ms 단위 배치 flush 시 원자적으로 처리된다.
+    this.positionBroadcastService.enqueueUpdate(gameId, {
       playerId: clientId,
       positionX: newPosition[0],
       positionY: newPosition[1],
       gameId,
       isAlive: isAlive ?? '1'
     });
-
-    const pipeline = this.redis.pipeline();
-    pipeline.hmset(playerKey, {
-      positionX: newPosition[0].toString(),
-      positionY: newPosition[1].toString()
-    });
-    pipeline.publish(REDIS_KEY.POSITION_CHANNEL(gameId), message);
-    await pipeline.exec();
   }
 
   async startGame(startGameDto: StartGameDto, clientId: string) {

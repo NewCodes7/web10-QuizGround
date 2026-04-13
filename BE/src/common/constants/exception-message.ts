@@ -8,5 +8,8 @@ export const ExceptionMessage = {
   GAME_ALREADY_STARTED: '게임이 이미 시작되었습니다.',
   PLAYER_NOT_FOUND: '존재하지 않는 플레이어입니다.',
   CONNECTION_ERROR:
-    '\n소켓 연결시 title,gameMode,maxPlayerCount,isPublic 이 있어야 합니다. 또는 참가할 game-id가 있어야 합니다.'
+    '\n소켓 연결시 title,gameMode,maxPlayerCount,isPublic 이 있어야 합니다. 또는 참가할 game-id가 있어야 합니다.',
+  // TICKET-001
+  UNAUTHORIZED_ROOM_ACCESS: '해당 게임 방에 대한 접근 권한이 없습니다.',
+  INVALID_SEQ: 'lastSeq는 0 이상이어야 합니다.'
 };
