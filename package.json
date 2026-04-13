@@ -1,0 +1,10 @@
+{
+  "name": "web10-quizground",
+  "private": true,
+  "scripts": {
+    "dev:infra": "docker compose -f .devcontainer/docker-compose.yml up -d mysql redis",
+    "dev:be": "npm --prefix BE run start:dev",
+    "dev:fe": "npm --prefix FE run dev",
+    "test:integration": "npm --prefix BE run test:integration"
+  }
+}

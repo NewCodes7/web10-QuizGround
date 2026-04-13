@@ -131,7 +131,5 @@ class SocketService {
   }
 }
 
-// const socketPort = process.env.SOCKET_PORT || '3333';
-// const socketUrl = `${window.location.origin}:${socketPort}/game`;
-const socketUrl = 'https://quizground.site:3333/game';
+const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000/game';
 export const socketService = new SocketService(socketUrl);

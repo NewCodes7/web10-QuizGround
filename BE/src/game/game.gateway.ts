@@ -35,6 +35,10 @@ import { RetransmitPositionDto } from './dto/retransmit-position.dto';
 @WebSocketGateway({
   cors: {
     origin: [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173',
       'https://news.taskify.shop',
       'https://quizground.duckdns.org',
       'https://admin.socket.io',
@@ -160,7 +164,11 @@ export class GameGateway {
 
   setNewPlayerIdToCookie(headers) {
     const playerId = uuidv4();
-    headers['Set-Cookie'] = serialize('playerId', playerId, { sameSite: 'none', secure: true });
+    const isSecureCookie = process.env.COOKIE_SECURE === 'true';
+    headers['Set-Cookie'] = serialize('playerId', playerId, {
+      sameSite: isSecureCookie ? 'none' : 'lax',
+      secure: isSecureCookie
+    });
     return playerId;
   }
 
