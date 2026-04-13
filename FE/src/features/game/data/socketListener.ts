@@ -39,14 +39,51 @@ socketService.on('joinRoom', (data) => {
   }
 });
 
+// 방 단위 마지막으로 받은 seq 추적 (gap 감지용)
+const roomSeqMap = new Map<string, number>();
+// 플레이어 단위 마지막으로 적용된 seq 추적 (재전송 중복 적용 방지)
+const playerAppliedSeqMap = new Map<string, number>();
+
 socketService.on('updatePosition', (data) => {
-  if (Array.isArray(data)) {
-    data.forEach((e) => {
-      usePlayerStore.getState().updatePlayerPosition(e.playerId, e.playerPosition);
-    });
-  } else {
-    usePlayerStore.getState().updatePlayerPosition(data.playerId, data.playerPosition);
+  // 신규 포맷: { seq, updates: [{playerId, playerPosition}] }
+  // 구 포맷 호환: [{playerId, playerPosition}] 또는 {playerId, playerPosition}
+  const isFramed = !Array.isArray(data) && data.updates !== undefined;
+  const updates: { playerId: string; playerPosition: [number, number] }[] = isFramed
+    ? data.updates
+    : Array.isArray(data)
+      ? data
+      : [data];
+  const seq: number | undefined = isFramed ? data.seq : undefined;
+
+  if (seq !== undefined) {
+    const gameId = useRoomStore.getState().gameId;
+    if (gameId) {
+      const last = roomSeqMap.get(gameId) ?? 0;
+      if (last > 0 && seq > last + 1) {
+        socketService.emit('retransmitPosition', { gameId, lastSeq: last });
+      }
+      roomSeqMap.set(gameId, seq);
+    }
   }
+
+  updates.forEach((e) => {
+    if (seq !== undefined) playerAppliedSeqMap.set(e.playerId, seq);
+    usePlayerStore.getState().updatePlayerPosition(e.playerId, e.playerPosition);
+  });
+});
+
+socketService.on('positionRetransmitResponse', (data) => {
+  const gameId = useRoomStore.getState().gameId;
+  if (gameId) {
+    roomSeqMap.set(gameId, Math.max(roomSeqMap.get(gameId) ?? 0, data.seq));
+  }
+  (data.updates ?? []).forEach((e: { playerId: string; playerPosition: [number, number]; appliedSeq: number }) => {
+    const currentApplied = playerAppliedSeqMap.get(e.playerId) ?? 0;
+    if (e.appliedSeq > currentApplied) {
+      playerAppliedSeqMap.set(e.playerId, e.appliedSeq);
+      usePlayerStore.getState().updatePlayerPosition(e.playerId, e.playerPosition);
+    }
+  });
 });
 
 socketService.on('endQuizTime', (data) => {
@@ -163,4 +200,6 @@ socketService.on('disconnect', () => {
   usePlayerStore.getState().reset();
   useChatStore.getState().reset();
   useQuizStore.getState().reset();
+  roomSeqMap.clear();
+  playerAppliedSeqMap.clear();
 });

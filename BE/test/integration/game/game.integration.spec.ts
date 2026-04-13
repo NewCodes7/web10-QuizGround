@@ -59,7 +59,9 @@ describe('Game 통합테스트', () => {
         });
       });
 
-      expect(updateResponse.playerPosition).toEqual(newPosition);
+      // 새 포맷: { seq, updates: [{ playerId, playerPosition }] }
+      const update = updateResponse.updates?.[0] ?? updateResponse;
+      expect(update.playerPosition).toEqual(newPosition);
 
       // Redis에서 위치 정보 확인
       const playerData = await redisMock.hgetall(`Player:${client1Id}`);

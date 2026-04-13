@@ -33,6 +33,7 @@ export const QuizOptionBoard = () => {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const [boardRect, setBoardRect] = useState<null | DOMRect>(null);
   const [isWarningMove, setIsWarningMove] = useState(false);
+  const lastEmitRef = useRef<number>(0);
 
   // 보드 크기 초기화
   useEffect(() => {
@@ -64,6 +65,8 @@ export const QuizOptionBoard = () => {
     return () => clearInterval(interval);
   }, [currentQuiz]);
 
+  const EMIT_THROTTLE_MS = 50;
+
   const handleMove = (pageX: number, pageY: number) => {
     const currentPlayer = players.get(currentPlayerId);
     if (!currentPlayer || !currentPlayer.isAlive) {
@@ -75,6 +78,9 @@ export const QuizOptionBoard = () => {
     const x = (pageX - left - window.scrollX) / width;
     const y = (pageY - top - window.scrollY) / height;
     if (x > 1 || y > 1 || x < 0 || y < 0) return;
+    const now = Date.now();
+    if (now - lastEmitRef.current < EMIT_THROTTLE_MS) return;
+    lastEmitRef.current = now;
     socketService.emit('updatePosition', { gameId, newPosition: [y, x] });
     const option = Math.round(x) + Math.floor(y * Math.ceil(choiceList.length / 2)) * 2;
     setSelectedOption(option);

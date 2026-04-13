@@ -22,6 +22,29 @@ type UpdatePositionResponse = {
   playerPosition: [number, number];
 };
 
+// 배치 포맷 (서버 브로드캐스트)
+type UpdatePositionBatchResponse = {
+  seq: number;
+  updates: UpdatePositionResponse[];
+};
+
+type RetransmitPositionRequest = {
+  gameId: string;
+  lastSeq: number;
+};
+
+type PositionRetransmitResponseItem = {
+  playerId: string;
+  playerPosition: [number, number];
+  appliedSeq: number;
+};
+
+type PositionRetransmitResponse = {
+  seq: number;
+  retransmitted: boolean;
+  updates: PositionRetransmitResponseItem[];
+};
+
 type CreateRoomResponse = {
   gameId: string; // PIN
 };
@@ -130,7 +153,15 @@ export type SocketDataMap = {
   };
   updatePosition: {
     request: UpdatePositionRequest;
-    response: UpdatePositionResponse | UpdatePositionResponse[];
+    response: UpdatePositionBatchResponse | UpdatePositionResponse | UpdatePositionResponse[];
+  };
+  retransmitPosition: {
+    request: RetransmitPositionRequest;
+    response: null;
+  };
+  positionRetransmitResponse: {
+    request: null;
+    response: PositionRetransmitResponse;
   };
   createRoom: {
     request: null;

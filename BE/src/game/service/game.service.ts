@@ -28,35 +28,33 @@ export class GameService {
     private readonly gameRoomService: GameRoomService
   ) {}
 
-  /**
-   * 최적화된 플레이어 위치 업데이트 함수
-   * @param updatePosition - 업데이트할 위치 정보
-   * @param clientId - 플레이어 ID
-   * @returns Promise<void>
-   * @throws {Error} 플레이어가 게임에 속해있지 않은 경우
-   * @example
-   * await updatePosition({ gameId: '123', newPosition: [1, 2] }, 'player1');
-   */
   async updatePosition(updatePosition: UpdatePositionDto, clientId: string): Promise<void> {
     const { gameId, newPosition } = updatePosition;
     const playerKey = REDIS_KEY.PLAYER(clientId);
 
-    // 1. 먼저 검증
-    const playerGameId = await this.redis.hget(playerKey, 'gameId');
+    // 1. gameId + isAlive 한 번에 조회하여 검증
+    const [playerGameId, isAlive] = await this.redis.hmget(playerKey, 'gameId', 'isAlive');
     this.gameValidator.validatePlayerInRoomV2(
       SocketEvents.UPDATE_POSITION,
       gameId,
       playerGameId?.toString()
     );
 
-    // 2. 검증 통과 후 업데이트 수행
+    // 2. 위치 저장 + position 채널 publish를 파이프라인으로 처리
+    const message = JSON.stringify({
+      playerId: clientId,
+      positionX: newPosition[0],
+      positionY: newPosition[1],
+      gameId,
+      isAlive: isAlive ?? '1'
+    });
+
     const pipeline = this.redis.pipeline();
-    pipeline.set(`${playerKey}:Changes`, 'Position');
     pipeline.hmset(playerKey, {
       positionX: newPosition[0].toString(),
       positionY: newPosition[1].toString()
     });
-
+    pipeline.publish(REDIS_KEY.POSITION_CHANNEL(gameId), message);
     await pipeline.exec();
   }
 

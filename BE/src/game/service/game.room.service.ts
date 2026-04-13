@@ -12,6 +12,7 @@ import { Socket } from 'socket.io';
 import { KickRoomDto } from '../dto/kick-room.dto';
 import { TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
 import { SurvivalStatus } from '../../common/constants/game';
+import { PositionBroadcastService } from './position-broadcast.service';
 
 @TraceClass()
 @Injectable()
@@ -21,7 +22,8 @@ export class GameRoomService {
 
   constructor(
     @InjectRedis() private readonly redis: Redis,
-    private readonly gameValidator: GameValidator
+    private readonly gameValidator: GameValidator,
+    private readonly positionBroadcastService: PositionBroadcastService
   ) {}
 
   async createRoom(gameConfig: CreateGameDto, clientId: string): Promise<string> {
@@ -74,12 +76,13 @@ export class GameRoomService {
       }
 
       client.join(gameId);
-      
+      this.positionBroadcastService.onRoomJoined(gameId);
+
       await this.redis.set(`${REDIS_KEY.PLAYER(clientId)}:Changes`, 'SocketID');
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
-      
+
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
       return;
     }
@@ -98,6 +101,7 @@ export class GameRoomService {
     }
 
     client.join(gameId); //validation 후에 조인해야함
+    this.positionBroadcastService.onRoomJoined(gameId);
 
     const positionX = Math.random();
     const positionY = Math.random();
@@ -202,8 +206,13 @@ export class GameRoomService {
     const playerKey = REDIS_KEY.PLAYER(clientId);
     const player = await this.redis.hgetall(playerKey);
     const roomId = player.gameId;
-    const roomKey = REDIS_KEY.ROOM(roomId);
 
+    // 게임 상태와 무관하게 로컬 클라이언트 카운트 감소
+    if (roomId) {
+      this.positionBroadcastService.onRoomLeft(roomId);
+    }
+
+    const roomKey = REDIS_KEY.ROOM(roomId);
     const room = await this.redis.hgetall(roomKey);
     if (room.status !== 'waiting' || room.isWaiting != '1') {
       return;

@@ -5,22 +5,20 @@ import Redis from 'ioredis';
 import { Namespace } from 'socket.io';
 import SocketEvents from '../../../common/constants/socket-events';
 import { REDIS_KEY } from '../../../common/constants/redis-key.constant';
-import { SurvivalStatus } from '../../../common/constants/game';
-import { BatchProcessor, BatchProcessorType } from '../../service/batch.processor';
-import { POSITION_BATCH_TIME } from '../../../common/constants/batch-time';
+import { PositionBroadcastService } from '../../service/position-broadcast.service';
+
 
 @Injectable()
 export class PlayerSubscriber extends RedisSubscriber {
   constructor(
     @InjectRedis() redis: Redis,
-    private positionProcessor: BatchProcessor
+    private readonly positionBroadcastService: PositionBroadcastService
   ) {
     super(redis);
   }
 
   async subscribe(server: Namespace): Promise<void> {
-    this.positionProcessor.initialize(server, SocketEvents.UPDATE_POSITION);
-    this.positionProcessor.startProcessing(POSITION_BATCH_TIME);
+    this.positionBroadcastService.initTimers(server);
 
     const subscriber = this.redis.duplicate();
     await subscriber.psubscribe('__keyspace@0__:Player:*');
@@ -51,10 +49,6 @@ export class PlayerSubscriber extends RedisSubscriber {
     switch (changes) {
       case 'Join':
         await this.handlePlayerJoin(playerId, playerData, server);
-        break;
-
-      case 'Position':
-        await this.handlePlayerPosition(playerId, playerData);
         break;
 
       case 'Disconnect':
@@ -89,22 +83,6 @@ export class PlayerSubscriber extends RedisSubscriber {
       players: [newPlayer]
     });
     this.logger.verbose(`Player joined: ${playerId} to game: ${playerData.gameId}`);
-  }
-
-  private async handlePlayerPosition(playerId: string, playerData: any) {
-    const { gameId, positionX, positionY } = playerData;
-    const playerPosition = [parseFloat(positionX), parseFloat(positionY)];
-    const updateData = { playerId, playerPosition };
-
-    const isAlivePlayer = await this.redis.hget(REDIS_KEY.PLAYER(playerId), 'isAlive');
-
-    if (isAlivePlayer === SurvivalStatus.ALIVE) {
-      this.positionProcessor.startMetric(BatchProcessorType.DEFAULT, gameId);
-      this.positionProcessor.pushData(BatchProcessorType.DEFAULT, gameId, updateData);
-    } else if (isAlivePlayer === SurvivalStatus.DEAD) {
-      this.positionProcessor.startMetric(BatchProcessorType.ONLY_DEAD, gameId);
-      this.positionProcessor.pushData(BatchProcessorType.ONLY_DEAD, gameId, updateData);
-    }
   }
 
   private async handlePlayerDisconnect(playerId: string, playerData: any, server: Namespace) {

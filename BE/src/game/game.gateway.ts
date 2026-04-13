@@ -26,6 +26,8 @@ import { SetPlayerNameDto } from './dto/set-player-name.dto';
 import { KickRoomDto } from './dto/kick-room.dto';
 import { ExceptionMessage } from '../common/constants/exception-message';
 import { MetricInterceptor } from '../metric/metric.interceptor';
+import { PositionBroadcastService } from './service/position-broadcast.service';
+import { RetransmitPositionDto } from './dto/retransmit-position.dto';
 
 @UseInterceptors(MetricInterceptor)
 @UseInterceptors(GameActivityInterceptor)
@@ -50,7 +52,8 @@ export class GameGateway {
   constructor(
     private readonly gameService: GameService,
     private readonly gameChatService: GameChatService,
-    private readonly gameRoomService: GameRoomService
+    private readonly gameRoomService: GameRoomService,
+    private readonly positionBroadcastService: PositionBroadcastService
   ) {}
 
   @SubscribeMessage(SocketEvents.UPDATE_POSITION)
@@ -60,6 +63,15 @@ export class GameGateway {
     @ConnectedSocket() client: Socket
   ): Promise<void> {
     await this.gameService.updatePosition(updatePosition, client.data.playerId);
+  }
+
+  @SubscribeMessage(SocketEvents.RETRANSMIT_POSITION)
+  @UsePipes(new GameValidationPipe(SocketEvents.RETRANSMIT_POSITION))
+  async handleRetransmitPosition(
+    @MessageBody() dto: RetransmitPositionDto,
+    @ConnectedSocket() client: Socket
+  ): Promise<void> {
+    await this.positionBroadcastService.handleRetransmit(dto.gameId, dto.lastSeq, client);
   }
 
   @SubscribeMessage(SocketEvents.CHAT_MESSAGE)

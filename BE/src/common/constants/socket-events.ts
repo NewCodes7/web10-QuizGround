@@ -14,7 +14,9 @@ const SocketEvents = {
   KICK_ROOM: 'kickRoom',
   SET_PLAYER_NAME: 'setPlayerName',
   GET_SELF_ID: 'getSelfId',
-  UPDATE_HOST: 'updateHost'
+  UPDATE_HOST: 'updateHost',
+  RETRANSMIT_POSITION: 'retransmitPosition',
+  POSITION_RETRANSMIT_RESPONSE: 'positionRetransmitResponse'
 } as const;
 
 export default SocketEvents;

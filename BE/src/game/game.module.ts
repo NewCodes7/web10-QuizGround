@@ -19,6 +19,7 @@ import { AuthModule } from '../auth/auth.module';
 import { SocketEventLoggerInterceptor } from '../common/interceptor/SocketEventLoggerInterceptor';
 import { SystemMetricsService } from '../common/service/SystemMetricsService';
 import { BatchProcessor } from './service/batch.processor';
+import { PositionBroadcastService } from './service/position-broadcast.service';
 
 @Module({
   imports: [RedisModule, QuizSetModule, JwtModule, AuthModule],
@@ -38,7 +39,8 @@ import { BatchProcessor } from './service/batch.processor';
     RoomCleanupSubscriber,
     SocketEventLoggerInterceptor,
     SystemMetricsService,
-    BatchProcessor
+    BatchProcessor,
+    PositionBroadcastService
   ],
   exports: [GameService]
 })
