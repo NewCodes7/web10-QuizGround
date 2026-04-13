@@ -5,6 +5,7 @@
   "workspaceFolder": "/workspaces/web10-QuizGround",
   "shutdownAction": "stopCompose",
   "remoteUser": "node",
+  "forwardPorts": [3000, 5173],
   "postCreateCommand": "npm i -g @openai/codex && curl -fsSL https://claude.ai/install.sh | bash",
   "customizations": {
     "vscode": {
