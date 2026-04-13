@@ -18,8 +18,6 @@ export class PlayerSubscriber extends RedisSubscriber {
   }
 
   async subscribe(server: Namespace): Promise<void> {
-    this.positionBroadcastService.initTimers(server);
-
     const subscriber = this.redis.duplicate();
     await subscriber.psubscribe('__keyspace@0__:Player:*');
 
@@ -43,6 +41,7 @@ export class PlayerSubscriber extends RedisSubscriber {
 
   private async handlePlayerChanges(changes: string, playerId: string, server: Namespace) {
     const playerKey = REDIS_KEY.PLAYER(playerId);
+    await this.redis.del(`${playerKey}:Changes`);
     const playerData = await this.redis.hgetall(playerKey);
     const result = { changes, playerData };
 

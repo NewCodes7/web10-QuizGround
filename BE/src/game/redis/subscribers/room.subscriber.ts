@@ -33,6 +33,7 @@ export class RoomSubscriber extends RedisSubscriber {
 
   private async handleRoomChanges(key: string, gameId: string, server: Namespace) {
     const changes = await this.redis.get(`${key}:Changes`);
+    await this.redis.del(`${key}:Changes`);
     const roomData = await this.redis.hgetall(key);
 
     switch (changes) {
