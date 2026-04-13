@@ -21,7 +21,7 @@ services:
       retries: 20
 
   workspace:
-    image: mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm
+    image: mcr.microsoft.com/devcontainers/javascript-node:24-bookworm
     volumes:
       - ..:/workspaces/web10-QuizGround:cached
     command: sleep infinity

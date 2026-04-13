@@ -4,7 +4,7 @@
   "service": "workspace",
   "workspaceFolder": "/workspaces/web10-QuizGround",
   "shutdownAction": "stopCompose",
-  "remoteUser": "node",
+  "remoteUser": "vscode",
   "customizations": {
     "vscode": {
       "extensions": [

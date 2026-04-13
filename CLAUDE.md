@@ -1,0 +1,166 @@
+# QuizGround - CLAUDE.md
+
+## Project Overview
+Real-time multiplayer quiz platform (up to 200 players/room). Two game modes: Survival (elimination) / Ranking (points). Monorepo: BE (NestJS) + FE (React+Vite).
+
+---
+
+## Stack
+
+### BE (`/BE`)
+- NestJS v10, TypeScript, Node.js
+- Socket.IO (WebSocket, `/game` namespace)
+- MySQL 8.0 + TypeORM (entities auto-sync in DEV mode)
+- Redis (ioredis) — game state, pub/sub, batch processing
+- JWT + Passport.js auth
+- Prometheus (prom-client) + Pinpoint APM
+
+### FE (`/FE`)
+- React 18, TypeScript, Vite
+- Zustand (state), TanStack Query (server state)
+- Socket.IO client, Axios
+- Tailwind CSS + Emotion + Material-UI
+- Framer Motion + Lottie (animations)
+- MSW (API mocking for dev)
+
+---
+
+## Commands
+
+### BE
+```bash
+cd BE
+npm run start:dev          # dev with hot reload
+npm run build              # compile to dist/
+npm run test               # unit tests
+npm run test:integration   # integration tests (real socket + redis-mock)
+npm run test:e2e           # e2e tests
+npm run lint               # eslint --fix
+npm run format             # prettier
+```
+
+### FE
+```bash
+cd FE
+npm run dev                # vite dev server (port 5173)
+npm run build              # production build
+npm run build-dev          # dev build
+npm run lint               # eslint
+```
+
+---
+
+## Environment Variables (BE)
+
+| Var | Default | Notes |
+|-----|---------|-------|
+| DB_HOST | localhost | MySQL |
+| DB_PORT | 3306 | |
+| DB_USER | root | |
+| DB_PASSWD | test | |
+| DB_NAME | test_db | |
+| REDIS_URL | redis://localhost:6379 | |
+| WAS_PORT | 3000 | |
+| DEV | - | enables TypeORM synchronize |
+
+---
+
+## Architecture
+
+### Distributed WAS
+WAS runs as multiple distributed instances. All game state (rooms, player sessions, scores) is stored in Redis so any server can serve any request — Redis is the source of truth for session consistency. Exception: `updatePosition` bypasses Redis pub/sub and pushes directly to the local `PositionBatchProcessor`, so position updates are not propagated across servers (Socket.IO Redis Adapter needed for full horizontal scaling).
+
+### Game Flow
+```
+Client connects → GameGateway (cookie-based playerId)
+  → createRoom / joinRoom → Redis Room:{gameId} hash
+  → startGame → pub/sub subscribers activate
+  → quiz loop: startQuizTime → position updates (BatchProcessor) → endQuizTime → scoring
+  → gameEnd → DB archive + Redis cleanup
+```
+
+### Redis Key Patterns
+```
+Room:{gameId}                    # room metadata hash
+Room:{gameId}:Players            # set of playerIds
+Room:{gameId}:Quiz:{quizId}      # quiz data
+Room:{gameId}:Leaderboard        # sorted scores
+Room:{gameId}:CurrentQuiz        # current quiz index
+Room:{gameId}:Timer              # timer state
+Player:{playerId}                # player session hash
+Player:{playerId}:Changes        # dirty flags for batch
+Quizset:{quizSetId}              # cached quiz set
+ActiveRooms                      # set of active game IDs
+```
+
+### Event Subscribers (game.module.ts)
+- `ScoringSubscriber` — quiz answer scoring
+- `TimerSubscriber` — quiz timer management
+- `RoomSubscriber` — room state broadcast
+- `PlayerSubscriber` — player state updates
+- `RoomCleanupSubscriber` — 30-min TTL cleanup
+
+### Key BE Services
+| Service | File | Purpose |
+|---------|------|---------|
+| GameGateway | `game/game.gateway.ts` | WebSocket entry, event handlers |
+| GameService | `game/service/game.service.ts` | Core logic, position updates |
+| GameRoomService | `game/service/game.room.service.ts` | Room lifecycle |
+| BatchProcessor | `game/service/batch.processor.ts` | Batches socket events (~16ms) |
+| GameChatService | `game/service/game.chat.service.ts` | Redis pub/sub chat |
+| QuizCacheService | - | In-memory quiz cache |
+| MetricService | `metric/metric.service.ts` | Prometheus metrics |
+
+### FE Zustand Stores (`/FE/src/features/game/data/store/`)
+- `usePlayerStore` — positions, names, alive status
+- `useRoomStore` — room metadata
+- `useQuizStore` — current quiz, choices, timer
+- `useChatStore` — chat messages
+
+---
+
+## DB Schema
+- `quiz_set` — title (FTS ngram for Korean), category, user_id
+- `quiz` — question, explanation, quizSetId
+- `quiz_choice` — text, isCorrect, quizId
+- `user` — email, password(bcrypt), nickname, points
+- `user_quiz_archive` — userId, quizSetId, mode, score
+
+---
+
+## Key Files
+```
+BE/src/main.ts                          # bootstrap
+BE/src/app.module.ts                    # DB/Redis config, env vars
+BE/src/game/game.gateway.ts             # WebSocket events
+BE/src/game/game.module.ts              # wires everything
+BE/src/common/constants/redis-key.constant.ts  # Redis key templates
+BE/test/integration/setup/game.setup.ts        # test infra
+
+FE/src/api/socket/socket.ts             # Socket.IO client (mock support via PIN)
+FE/src/api/socket/socketEventTypes.ts  # event type defs
+FE/src/features/game/data/socketListener.ts    # socket handlers
+FE/src/constants/socketEvents.ts       # event name constants
+```
+
+---
+
+## Notable Patterns
+- **BatchProcessor**: aggregates position updates, fires every ~16ms → p95 latency 7.1s→0.11s
+- **Mock Socket (FE)**: PIN-based switching in `socket.ts` for offline dev
+- **FTS**: MySQL ngram parser on `quiz_set.title` for Korean search (50% faster than LIKE)
+- **Cookie auth**: playerId stored in secure httpOnly cookie (sameSite=none)
+- **CORS whitelist**: quizground.site, quizground.duckdns.org
+- **Socket Admin**: `/admin` endpoint for dev monitoring
+- **Production socket**: `https://quizground.site:3333/game`
+
+---
+
+## Testing
+- Unit: `src/**/*.spec.ts`
+- Integration: `test/integration/` — real socket connections, ioredis-mock
+- E2E: `test/jest-e2e.json`
+- Key integration files:
+  - `test/integration/game/game.integration.spec.ts`
+  - `test/integration/game/game-survival.integration.spec.ts`
+  - `test/integration/setup/socket.helper.ts`
