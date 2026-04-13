@@ -11,7 +11,9 @@
     "vscode": {
       "extensions": [
         "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "Orta.vscode-jest",
+        "firsttris.vscode-jest-runner"
       ]
     }
   }
