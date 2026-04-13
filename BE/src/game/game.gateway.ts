@@ -42,7 +42,8 @@ import { RetransmitPositionDto } from './dto/retransmit-position.dto';
       'https://news.taskify.shop',
       'https://quizground.duckdns.org',
       'https://admin.socket.io',
-      'https://quizground.site'
+      'https://quizground.site',
+      /\.app\.github\.dev$/
     ],
     credentials: true
   },
