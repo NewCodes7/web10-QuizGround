@@ -73,12 +73,19 @@ export class GameChatService implements OnApplicationShutdown {
   /** 재전송용 최근 배치 로그: gameId → BatchLogEntry[] */
   private batchLogMap = new Map<string, BatchLogEntry[]>();
 
-  /** 슬롯 기반 타이머 (PositionBroadcastService 패턴 참조) */
-  private timers: TimerSlot[] = [];
+  /**
+   * IN 타이머: 인메모리 큐 → Redis Stream (XADD)
+   * OUT 타이머: Redis Stream → 클라이언트 브로드캐스트 (XRANGE)
+   * 두 타이머는 독립적으로 동작하며 OUT은 IN보다 CHAT_BATCH_TIME/2 늦게 시작한다.
+   */
+  private inTimers: TimerSlot[] = [];
+  private outTimers: TimerSlot[] = [];
   private roomCounter = 0;
 
-  /** 현재 플러시 중인 방 (중복 실행 방지) */
-  private processingRooms = new Set<string>();
+  /** 동시 쓰기 방지 (같은 방의 writeRoom 중복 실행 방지) */
+  private writingRooms = new Set<string>();
+  /** 동시 브로드캐스트 방지 (같은 방의 broadcastRoom 중복 실행 방지) */
+  private broadcastingRooms = new Set<string>();
 
   /** 로컬 클라이언트 카운트: gameId → count */
   private localClientCounts = new Map<string, number>();
@@ -95,7 +102,8 @@ export class GameChatService implements OnApplicationShutdown {
     private readonly chatMessageRepository: Repository<ChatMessageModel>
   ) {
     for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
-      this.timers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
+      this.inTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
+      this.outTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
     }
   }
 
@@ -107,17 +115,32 @@ export class GameChatService implements OnApplicationShutdown {
    */
   initTimers(server: Namespace): void {
     this.server = server;
-    const slotOffset = CHAT_BATCH_TIME / CHAT_MAX_TIMERS;
+    const slotOffset = CHAT_BATCH_TIME / CHAT_MAX_TIMERS; // 5ms
+    // OUT 타이머는 IN보다 반 주기(25ms) 늦게 시작해,
+    // IN이 Stream에 쓴 뒤 OUT이 읽도록 순서를 보장한다.
+    const outDelay = CHAT_BATCH_TIME / 2; // 25ms
+
     for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
-      const slotIndex = i;
-      this.timers[i].offsetTimeout = setTimeout(() => {
-        this.timers[slotIndex].interval = setInterval(() => {
-          this.flushSlot(slotIndex);
+      const idx = i;
+
+      // IN: idx * 5ms 오프셋 후 50ms 간격으로 인메모리 큐 → Stream 쓰기
+      this.inTimers[i].offsetTimeout = setTimeout(() => {
+        this.inTimers[idx].interval = setInterval(() => {
+          this.writeSlot(idx);
         }, CHAT_BATCH_TIME);
-      }, slotIndex * slotOffset);
+      }, idx * slotOffset);
+
+      // OUT: (idx * 5ms + 25ms) 오프셋 후 50ms 간격으로 Stream → 브로드캐스트
+      this.outTimers[i].offsetTimeout = setTimeout(() => {
+        this.outTimers[idx].interval = setInterval(() => {
+          this.broadcastSlot(idx);
+        }, CHAT_BATCH_TIME);
+      }, idx * slotOffset + outDelay);
     }
+
     this.logger.verbose(
-      `Chat timer slots started: ${CHAT_MAX_TIMERS} slots × ${CHAT_BATCH_TIME}ms, ${slotOffset}ms offset`
+      `Chat IN/OUT timer slots started: ${CHAT_MAX_TIMERS} slots × ${CHAT_BATCH_TIME}ms, ` +
+        `slotOffset=${slotOffset}ms, outDelay=${outDelay}ms`
     );
 
     // MySQL 영속화 주기 타이머 (분산 락 기반)
@@ -128,9 +151,11 @@ export class GameChatService implements OnApplicationShutdown {
   }
 
   onApplicationShutdown(): void {
-    for (const slot of this.timers) {
-      if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
-      if (slot.interval) clearInterval(slot.interval);
+    for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
+      if (this.inTimers[i].offsetTimeout) clearTimeout(this.inTimers[i].offsetTimeout);
+      if (this.inTimers[i].interval) clearInterval(this.inTimers[i].interval);
+      if (this.outTimers[i].offsetTimeout) clearTimeout(this.outTimers[i].offsetTimeout);
+      if (this.outTimers[i].interval) clearInterval(this.outTimers[i].interval);
     }
     if (this.persistTimer) clearInterval(this.persistTimer);
     this.logger.verbose('GameChatService shutdown complete');
@@ -292,13 +317,15 @@ export class GameChatService implements OnApplicationShutdown {
   }
 
   private cleanupRoom(gameId: string): void {
-    for (const slot of this.timers) {
-      slot.rooms.delete(gameId);
+    for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
+      this.inTimers[i].rooms.delete(gameId);
+      this.outTimers[i].rooms.delete(gameId);
     }
     this.inputQueue.delete(gameId);
     this.lastStreamIdMap.delete(gameId);
     this.batchLogMap.delete(gameId);
-    this.processingRooms.delete(gameId);
+    this.writingRooms.delete(gameId);
+    this.broadcastingRooms.delete(gameId);
 
     this.redis
       .del(
@@ -311,77 +338,93 @@ export class GameChatService implements OnApplicationShutdown {
         this.logger.error(`Chat Redis cleanup failed for room ${gameId}: ${err.message}`)
       );
 
-    this.logger.verbose(`Chat input queue cleaned up for room ${gameId}`);
+    this.logger.verbose(`Chat room cleaned up: ${gameId}`);
   }
 
   private assignTimer(gameId: string): void {
     const idx = this.roomCounter % CHAT_MAX_TIMERS;
-    this.timers[idx].rooms.add(gameId);
+    this.inTimers[idx].rooms.add(gameId);
+    this.outTimers[idx].rooms.add(gameId);
     this.roomCounter++;
 
-    const slotSize = this.timers[idx].rooms.size;
+    const slotSize = this.inTimers[idx].rooms.size;
     if (slotSize > 1) {
       this.logger.warn(`Chat slot ${idx} now has ${slotSize} rooms`);
     }
   }
 
-  // ── Private: flush pipeline ────────────────────────────────────────────────
+  // ── Private: IN 타이머 (인메모리 큐 → Redis Stream) ───────────────────────
 
-  private flushSlot(slotIndex: number): void {
-    for (const gameId of this.timers[slotIndex].rooms) {
-      this.flushRoom(gameId).catch((err) => {
-        this.logger.error(`Chat flushRoom error for room ${gameId}: ${err.message}`);
+  private writeSlot(slotIndex: number): void {
+    for (const gameId of this.inTimers[slotIndex].rooms) {
+      this.writeRoom(gameId).catch((err) => {
+        this.logger.error(`Chat writeRoom error for room ${gameId}: ${err.message}`);
       });
     }
   }
 
   /**
-   * IN:  인메모리 큐를 Redis Stream에 쓴다 (XADD + XTRIM).
-   * OUT: Stream에서 새 항목을 읽어(XRANGE) 클라이언트에 방송한다.
+   * IN: 인메모리 큐를 드레인해 Redis Stream에 XADD한다.
+   * XADD 내 MAXLEN ~ 옵션으로 별도 XTRIM 없이 트림을 처리한다.
+   * (XTRIM을 XRANGE 전에 실행하면 방금 쓴 항목이 트림될 수 있어 trim race 발생)
    */
-  private async flushRoom(gameId: string): Promise<void> {
-    if (this.processingRooms.has(gameId)) return;
-    this.processingRooms.add(gameId);
-
-    const flushStart = Date.now();
+  private async writeRoom(gameId: string): Promise<void> {
+    if (this.writingRooms.has(gameId)) return;
+    this.writingRooms.add(gameId);
 
     try {
-      // ── Phase 1: Write ────────────────────────────────────────────────────
       const localQueue = this.inputQueue.get(gameId);
-      if (localQueue && localQueue.length > 0) {
-        const batch = localQueue.splice(0, localQueue.length);
+      if (!localQueue || localQueue.length === 0) return;
 
-        this.logger.debug(
-          `[flushRoom] stream write — gameId=${gameId} batchSize=${batch.length} ` +
-            batch.map((m) => `${m.playerId}("${m.message.slice(0, 20)}")`).join(' ')
+      const batch = localQueue.splice(0, localQueue.length);
+
+      this.logger.debug(
+        `[writeRoom] gameId=${gameId} batchSize=${batch.length} ` +
+          batch.map((m) => `${m.playerId}("${m.message.slice(0, 20)}")`).join(' ')
+      );
+
+      const pipeline = this.redis.pipeline();
+      for (const msg of batch) {
+        (pipeline as any).xadd(
+          REDIS_KEY.ROOM_CHAT_STREAM(gameId),
+          'MAXLEN', '~', CHAT_STREAM_MAXLEN,
+          '*',
+          'playerId', msg.playerId,
+          'playerName', msg.playerName,
+          'message', msg.message,
+          'timestamp', msg.timestamp.toString(),
+          'isAlive', msg.isAlive
         );
-
-        // XADD에 MAXLEN ~ 옵션을 인라인으로 지정한다.
-        // 별도 XTRIM을 Phase 1 마지막에 실행하면 방금 쓴 항목이 트림된 후
-        // Phase 2의 XRANGE에서 읽지 못해 메시지가 유실될 수 있다 (trim race).
-        // XADD 내 트림은 해당 entry 추가 전에 수행되므로 새로 쓴 항목은 항상 안전하다.
-        const pipeline = this.redis.pipeline();
-        for (const msg of batch) {
-          (pipeline as any).xadd(
-            REDIS_KEY.ROOM_CHAT_STREAM(gameId),
-            'MAXLEN', '~', CHAT_STREAM_MAXLEN,
-            '*',
-            'playerId', msg.playerId,
-            'playerName', msg.playerName,
-            'message', msg.message,
-            'timestamp', msg.timestamp.toString(),
-            'isAlive', msg.isAlive
-          );
-        }
-        await pipeline.exec();
-
       }
+      await pipeline.exec();
+    } finally {
+      this.writingRooms.delete(gameId);
+    }
+  }
 
-      // ── Phase 2: Read & Broadcast ─────────────────────────────────────────
+  // ── Private: OUT 타이머 (Redis Stream → 클라이언트 브로드캐스트) ──────────
+
+  private broadcastSlot(slotIndex: number): void {
+    for (const gameId of this.outTimers[slotIndex].rooms) {
+      this.broadcastRoom(gameId).catch((err) => {
+        this.logger.error(`Chat broadcastRoom error for room ${gameId}: ${err.message}`);
+      });
+    }
+  }
+
+  /**
+   * OUT: Redis Stream에서 새 항목을 XRANGE로 읽어 클라이언트에 방송한다.
+   * XRANGE exclusive 범위 문법 `(id`는 Redis 6.2+ 필요.
+   * seq는 alive 메시지가 있을 때만 INCR한다 (dead 전용 배치의 seq 갭 방지).
+   */
+  private async broadcastRoom(gameId: string): Promise<void> {
+    if (this.broadcastingRooms.has(gameId)) return;
+    this.broadcastingRooms.add(gameId);
+
+    const start_ts = Date.now();
+
+    try {
       const lastStreamId = this.lastStreamIdMap.get(gameId) ?? '0-0';
-      // XRANGE exclusive 범위 문법 `(id`는 Redis 6.2+ 필요.
-      // 이하 버전에서는 syntax error가 발생하므로 Redis >= 6.2 환경에서만 운영할 것.
-      // 첫 읽기(0-0 sentinel)는 처음부터(-), 이후는 exclusive start로 중복 방지.
       const start = lastStreamId === '0-0' ? '-' : `(${lastStreamId}`;
       const entries = (await this.redis.xrange(
         REDIS_KEY.ROOM_CHAT_STREAM(gameId),
@@ -392,8 +435,6 @@ export class GameChatService implements OnApplicationShutdown {
       if (entries.length === 0) return;
 
       const parsed = this._parseStreamEntries(entries);
-
-      // 마지막으로 읽은 stream ID 갱신
       this.lastStreamIdMap.set(gameId, entries[entries.length - 1][0]);
 
       const broadcastMessages: ChatBroadcastMessage[] = parsed.map((m) => ({
@@ -407,13 +448,9 @@ export class GameChatService implements OnApplicationShutdown {
       const aliveMessages = broadcastMessages.filter((_, i) => isAliveFlags[i]);
       const deadMessages = broadcastMessages.filter((_, i) => !isAliveFlags[i]);
 
-      // seq는 alive 메시지가 있을 때만 발급한다.
-      // dead 전용 배치에서 seq를 INCR하면 alive 클라이언트의 chatSeqMap에
-      // 갭이 생겨 불필요한 retransmitChat 폭풍이 발생하기 때문이다.
       if (aliveMessages.length > 0 && this.server) {
         const seq = await this.redis.incr(REDIS_KEY.ROOM_CHAT_SEQ(gameId));
 
-        // 재전송용 배치 로그 업데이트 (alive 메시지만 기록)
         const batchLog = this.batchLogMap.get(gameId);
         if (batchLog) {
           batchLog.push({ seq, messages: aliveMessages, isAliveFlags: aliveMessages.map(() => true) });
@@ -425,27 +462,21 @@ export class GameChatService implements OnApplicationShutdown {
         this.server.to(gameId).emit(SocketEvents.CHAT_MESSAGE, { seq, messages: aliveMessages });
       }
 
-      // dead 발신자 메시지 → dead 플레이어에게만 전송 (seq 없이 별도 채널)
       if (deadMessages.length > 0 && this.server) {
-        await this.broadcastToDeadPlayers(gameId, deadMessages);
+        this.broadcastToDeadPlayers(gameId, deadMessages);
       }
 
-      const elapsed = Date.now() - flushStart;
-
+      const elapsed = Date.now() - start_ts;
       if (elapsed > CHAT_BATCH_TIME * 0.8) {
         this.logger.warn(
-          `Room ${gameId} chat flush took ${elapsed}ms (>${CHAT_BATCH_TIME * 0.8}ms threshold)`
+          `Room ${gameId} broadcastRoom took ${elapsed}ms (>${CHAT_BATCH_TIME * 0.8}ms threshold)`
         );
       }
-
-      const aliveIds = aliveMessages.map((m) => m.playerId).join(',');
-      const deadIds = deadMessages.map((m) => m.playerId).join(',');
       this.logger.debug(
-        `[flushRoom] broadcast — gameId=${gameId} ` +
-          `alive=${aliveMessages.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}] elapsed=${elapsed}ms`
+        `[broadcastRoom] gameId=${gameId} alive=${aliveMessages.length} dead=${deadMessages.length} elapsed=${elapsed}ms`
       );
     } finally {
-      this.processingRooms.delete(gameId);
+      this.broadcastingRooms.delete(gameId);
     }
   }
 
