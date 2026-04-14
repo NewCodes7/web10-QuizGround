@@ -116,26 +116,31 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   private localClientCounts = new Map<string, number>();
 
   /**
-   * Slot-based timer array (TICKET-007).
-   *
-   * Slot assignment strategy:
-   *   - Rooms 1..POSITION_MAX_TIMERS → one room per slot (round-robin).
-   *   - Room (N > POSITION_MAX_TIMERS) → shares slot at index N % POSITION_MAX_TIMERS.
-   *   - Timer count is therefore always ≤ POSITION_MAX_TIMERS regardless of room count.
-   *   - Each slot fires independently every POSITION_BATCH_TIME ms, staggered by
-   *     (POSITION_BATCH_TIME / POSITION_MAX_TIMERS) ms offsets so that flushes are
-   *     spread across time rather than all firing simultaneously.
+   * IN 타이머: inputQueue → Redis 쓰기 (execFlush)
+   * OUT 타이머: pendingBroadcasts → socket.io emit
+   * OUT은 IN보다 POSITION_BATCH_TIME/2 늦게 시작해 IN 쓰기 후 OUT이 읽도록 순서를 보장한다.
    */
-  private timers: TimerSlot[] = [];
+  private inTimers: TimerSlot[] = [];
+  private outTimers: TimerSlot[] = [];
   private roomCounter = 0;
 
   /**
    * Local input queue (TICKET-003).
    * gameId → (playerId → latest PositionMessage)
    * Overwrite strategy: the most recent updatePosition call wins per player per batch.
-   * Filled by enqueueUpdate(); drained every POSITION_BATCH_TIME ms by the timer flush.
+   * Filled by enqueueUpdate(); drained every POSITION_BATCH_TIME ms by the IN timer.
    */
   private inputQueue = new Map<string, Map<string, PositionMessage>>();
+
+  /**
+   * IN→OUT 인메모리 버퍼.
+   * IN(writeRoom)이 execFlush 결과를 여기에 넣고,
+   * OUT(broadcastRoom)이 꺼내서 socket.io에 emit한다.
+   */
+  private pendingBroadcasts = new Map<
+    string,
+    Array<{ seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] }>
+  >();
 
   /** SHA1 of the loaded Lua script for EVALSHA. */
   private luaSha: string;
@@ -151,7 +156,8 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
   constructor(@InjectRedis() private readonly redis: Redis) {
     for (let i = 0; i < POSITION_MAX_TIMERS; i++) {
-      this.timers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
+      this.inTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
+      this.outTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
     }
 
     this.flushUpdatesCounter = new promClient.Counter({
@@ -201,21 +207,32 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   initTimers(server: Namespace): void {
     this.server = server;
     const slotOffset = POSITION_BATCH_TIME / POSITION_MAX_TIMERS;
+    const outDelay = POSITION_BATCH_TIME / 2;
     for (let i = 0; i < POSITION_MAX_TIMERS; i++) {
-      const slotIndex = i;
-      this.timers[i].offsetTimeout = setTimeout(() => {
-        this.timers[slotIndex].interval = setInterval(() => {
-          this.flushSlot(slotIndex);
-        }, POSITION_BATCH_TIME);
-      }, slotIndex * slotOffset);
+      const idx = i;
+      // IN timer: drain inputQueue → Redis write (execFlush) → push to pendingBroadcasts
+      this.inTimers[idx].offsetTimeout = setTimeout(() => {
+        this.inTimers[idx].interval = setInterval(() => this.writeSlot(idx), POSITION_BATCH_TIME);
+      }, idx * slotOffset);
+      // OUT timer: drain pendingBroadcasts → socket.io emit (half-period after IN)
+      this.outTimers[idx].offsetTimeout = setTimeout(() => {
+        this.outTimers[idx].interval = setInterval(
+          () => this.broadcastSlot(idx),
+          POSITION_BATCH_TIME
+        );
+      }, idx * slotOffset + outDelay);
     }
     this.logger.verbose(
-      `Position timer slots started: ${POSITION_MAX_TIMERS} slots × ${POSITION_BATCH_TIME}ms, ${slotOffset}ms offset`
+      `Position timer slots started: ${POSITION_MAX_TIMERS} IN+OUT slots × ${POSITION_BATCH_TIME}ms, ${slotOffset}ms offset, ${outDelay}ms IN→OUT gap`
     );
   }
 
   onApplicationShutdown(): void {
-    for (const slot of this.timers) {
+    for (const slot of this.inTimers) {
+      if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
+      if (slot.interval) clearInterval(slot.interval);
+    }
+    for (const slot of this.outTimers) {
       if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
       if (slot.interval) clearInterval(slot.interval);
     }
@@ -416,16 +433,20 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    * Also deletes Redis seq and log keys so stale data does not persist (TICKET-007).
    */
   private cleanupRoom(gameId: string): void {
-    for (const slot of this.timers) {
+    for (const slot of this.inTimers) {
+      slot.rooms.delete(gameId);
+    }
+    for (const slot of this.outTimers) {
       slot.rooms.delete(gameId);
     }
     this.inputQueue.delete(gameId);
+    this.pendingBroadcasts.delete(gameId);
     this.inputQueueSizeGauge.labels(gameId).set(0);
 
     this.redis
       .del(REDIS_KEY.ROOM_SEQ(gameId), REDIS_KEY.ROOM_POSITION_LOG(gameId))
       .catch((err) =>
-        this.logger.error(`Redis cleanup failed for room ${gameId}: ${err.message}`)
+        this.logger.error(`Redis cleanup failed for room ${gameId}: ${(err as Error).message}`)
       );
 
     this.logger.verbose(`Position input queue cleaned up for room ${gameId}`);
@@ -434,10 +455,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /** Round-robin slot assignment; warns when a slot hosts more than one room. */
   private assignTimer(gameId: string): void {
     const idx = this.roomCounter % POSITION_MAX_TIMERS;
-    this.timers[idx].rooms.add(gameId);
+    this.inTimers[idx].rooms.add(gameId);
+    this.outTimers[idx].rooms.add(gameId);
     this.roomCounter++;
 
-    const slotSize = this.timers[idx].rooms.size;
+    const slotSize = this.inTimers[idx].rooms.size;
     if (slotSize > 1) {
       this.logger.warn(
         `Slot ${idx} now has ${slotSize} rooms — flush latency per room in this slot may increase`
@@ -445,80 +467,113 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     }
   }
 
-  // ── Private: flush pipeline ────────────────────────────────────────────────
+  // ── Private: IN timer (write) ──────────────────────────────────────────────
 
-  private flushSlot(slotIndex: number): void {
-    for (const gameId of this.timers[slotIndex].rooms) {
-      this.flushRoom(gameId).catch((err) => {
-        this.logger.error(`flushRoom error for room ${gameId}: ${err.message}`);
+  private writeSlot(slotIndex: number): void {
+    for (const gameId of this.inTimers[slotIndex].rooms) {
+      this.writeRoom(gameId).catch((err) => {
+        this.logger.error(`writeRoom error for room ${gameId}: ${(err as Error).message}`);
       });
     }
   }
 
-  private async flushRoom(gameId: string): Promise<void> {
+  /**
+   * IN phase: drain inputQueue → execFlush → store result in pendingBroadcasts.
+   * The OUT timer picks up pendingBroadcasts ~POSITION_BATCH_TIME/2 ms later.
+   */
+  private async writeRoom(gameId: string): Promise<void> {
     const localQueue = this.inputQueue.get(gameId);
     if (!localQueue || localQueue.size === 0) return;
 
-    const flushStart = Date.now();
+    const writeStart = Date.now();
     const batch = Array.from(localQueue.values());
     localQueue.clear();
     this.inputQueueSizeGauge.labels(gameId).set(0);
     this.flushUpdatesCounter.labels(gameId).inc(batch.length);
 
     this.logger.debug(
-      `[flushRoom] redis write — gameId=${gameId} batchSize=${batch.length} ` +
+      `[writeRoom] redis write — gameId=${gameId} batchSize=${batch.length} ` +
         batch.map((m) => `${m.playerId}(${m.positionX},${m.positionY})`).join(' ')
     );
 
-    // TICKET-005: atomic write + seq + log + publish
     let seq: number;
     try {
       seq = await this.execFlush(gameId, batch);
     } catch (err) {
-      this.logger.error(`execFlush error for room ${gameId}: ${err.message}`);
+      this.logger.error(`execFlush error for room ${gameId}: ${(err as Error).message}`);
       return;
     }
 
-    // TICKET-002: alive/dead separation for broadcast
+    const elapsed = Date.now() - writeStart;
+    this.logger.debug(
+      `[writeRoom] done — gameId=${gameId} seq=${seq} batchSize=${batch.length} elapsed=${elapsed}ms`
+    );
+
+    // TICKET-002: split alive / dead for the OUT phase
     const aliveUpdates: PositionUpdate[] = [];
     const deadMessages: PositionMessage[] = [];
-
     for (const msg of batch) {
-      const update: PositionUpdate = {
-        playerId: msg.playerId,
-        playerPosition: [msg.positionX, msg.positionY]
-      };
       if (msg.isAlive === SurvivalStatus.ALIVE) {
-        aliveUpdates.push(update);
+        aliveUpdates.push({ playerId: msg.playerId, playerPosition: [msg.positionX, msg.positionY] });
       } else {
         deadMessages.push(msg);
       }
     }
 
-    if (aliveUpdates.length > 0 && this.server) {
-      this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+    // Buffer for the OUT timer
+    const pending = this.pendingBroadcasts.get(gameId);
+    if (pending) {
+      pending.push({ seq, aliveUpdates, deadMessages });
+    } else {
+      this.pendingBroadcasts.set(gameId, [{ seq, aliveUpdates, deadMessages }]);
     }
-    if (deadMessages.length > 0 && this.server) {
-      this.broadcastToDeadPlayers(gameId, seq, deadMessages).catch((err) => {
-        this.logger.error(`Dead player broadcast error for room ${gameId}: ${err.message}`);
+  }
+
+  // ── Private: OUT timer (broadcast) ────────────────────────────────────────
+
+  private broadcastSlot(slotIndex: number): void {
+    for (const gameId of this.outTimers[slotIndex].rooms) {
+      this.broadcastRoom(gameId).catch((err) => {
+        this.logger.error(`broadcastRoom error for room ${gameId}: ${(err as Error).message}`);
       });
     }
+  }
 
-    const elapsed = Date.now() - flushStart;
-    this.flushDurationHistogram.labels(gameId).observe(elapsed);
+  /**
+   * OUT phase: drain pendingBroadcasts → socket.io emit.
+   * Runs ~POSITION_BATCH_TIME/2 ms after writeRoom to ensure Redis writes complete first.
+   */
+  private async broadcastRoom(gameId: string): Promise<void> {
+    const pending = this.pendingBroadcasts.get(gameId);
+    if (!pending || pending.length === 0) return;
 
-    if (elapsed > POSITION_BATCH_TIME * 0.8) {
-      this.logger.warn(
-        `Room ${gameId} flush took ${elapsed}ms (>${POSITION_BATCH_TIME * 0.8}ms threshold)`
+    const batches = pending.splice(0); // drain atomically
+    if (!this.server) return;
+
+    const broadcastStart = Date.now();
+    for (const { seq, aliveUpdates, deadMessages } of batches) {
+      if (aliveUpdates.length > 0) {
+        this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+      }
+      if (deadMessages.length > 0) {
+        await this.broadcastToDeadPlayers(gameId, seq, deadMessages);
+      }
+
+      const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
+      const deadIds = deadMessages.map((m) => m.playerId).join(',');
+      this.logger.debug(
+        `[broadcastRoom] emit — gameId=${gameId} seq=${seq} ` +
+          `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}]`
       );
     }
 
-    const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
-    const deadIds = deadMessages.map((m) => m.playerId).join(',');
-    this.logger.debug(
-      `[flushRoom] broadcast — gameId=${gameId} seq=${seq} ` +
-        `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}] elapsed=${elapsed}ms`
-    );
+    const elapsed = Date.now() - broadcastStart;
+    this.flushDurationHistogram.labels(gameId).observe(elapsed);
+    if (elapsed > POSITION_BATCH_TIME * 0.8) {
+      this.logger.warn(
+        `Room ${gameId} broadcast took ${elapsed}ms (>${POSITION_BATCH_TIME * 0.8}ms threshold)`
+      );
+    }
   }
 
   /**
@@ -530,7 +585,8 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       try {
         return await this.execFlushLua(gameId, batch);
       } catch (err) {
-        if (err.message && err.message.includes('NOSCRIPT')) {
+        const msg = (err as Error).message ?? '';
+        if (msg.includes('NOSCRIPT')) {
           // Script evicted — reload once and retry
           try {
             this.luaSha = (await this.redis.script('LOAD', LUA_POSITION_FLUSH)) as string;
