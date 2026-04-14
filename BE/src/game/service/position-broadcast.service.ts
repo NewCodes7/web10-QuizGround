@@ -262,8 +262,15 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   enqueueUpdate(gameId: string, message: PositionMessage): void {
     const queue = this.inputQueue.get(gameId);
     if (!queue) return; // room not active on this server
+    const wasOverwritten = queue.has(message.playerId);
     queue.set(message.playerId, message);
     this.inputQueueSizeGauge.labels(gameId).set(queue.size);
+
+    this.logger.debug(
+      `[enqueueUpdate] gameId=${gameId} playerId=${message.playerId} ` +
+        `x=${message.positionX} y=${message.positionY} isAlive=${message.isAlive} ` +
+        `queueSize=${queue.size} overwritten=${wasOverwritten}`
+    );
   }
 
   // ── Retransmit (TICKET-001, 002, 006) ─────────────────────────────────────
@@ -305,6 +312,10 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     }
 
     this.retransmitCounter.inc();
+
+    this.logger.debug(
+      `[handleRetransmit] recv — playerId=${playerId} gameId=${gameId} lastSeq=${lastSeq}`
+    );
 
     // Get authoritative seq from Redis (TICKET-004)
     const currentSeqStr = await this.redis.get(REDIS_KEY.ROOM_SEQ(gameId));
@@ -378,6 +389,13 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
         appliedSeq: currentSeq
       }));
 
+    this.logger.debug(
+      `[handleRetransmit] send — playerId=${playerId} gameId=${gameId} ` +
+        `lastSeq=${lastSeq} currentSeq=${currentSeq} ` +
+        `isFallback=${isFallback} updateCount=${updates.length} ` +
+        `isAliveRequester=${isAliveRequester}`
+    );
+
     socket.emit(SocketEvents.POSITION_RETRANSMIT_RESPONSE, {
       seq: currentSeq,
       retransmitted: true,
@@ -447,6 +465,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     this.inputQueueSizeGauge.labels(gameId).set(0);
     this.flushUpdatesCounter.labels(gameId).inc(batch.length);
 
+    this.logger.debug(
+      `[flushRoom] redis write — gameId=${gameId} batchSize=${batch.length} ` +
+        batch.map((m) => `${m.playerId}(${m.positionX},${m.positionY})`).join(' ')
+    );
+
     // TICKET-005: atomic write + seq + log + publish
     let seq: number;
     try {
@@ -490,8 +513,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       );
     }
 
+    const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
+    const deadIds = deadMessages.map((m) => m.playerId).join(',');
     this.logger.debug(
-      `Room ${gameId} flush: seq=${seq} alive=${aliveUpdates.length} dead=${deadMessages.length} ${elapsed}ms`
+      `[flushRoom] broadcast — gameId=${gameId} seq=${seq} ` +
+        `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}] elapsed=${elapsed}ms`
     );
   }
 

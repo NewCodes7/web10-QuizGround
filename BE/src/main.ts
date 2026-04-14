@@ -3,11 +3,18 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { GameActivityInterceptor } from './game/interceptor/gameActivity.interceptor';
+import { KstLogger } from './common/logger/kst.logger';
 
 // env 불러오기
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logLevels: Array<'debug' | 'verbose' | 'log' | 'warn' | 'error' | 'fatal'> = process.env
+    .DEV
+    ? ['debug', 'verbose', 'log', 'warn', 'error', 'fatal']
+    : ['log', 'warn', 'error', 'fatal'];
+  const app = await NestFactory.create(AppModule, {
+    logger: new KstLogger(undefined, { logLevels })
+  });
   app.enableCors();
 
   // 전역 인터셉터로 등록

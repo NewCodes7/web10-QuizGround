@@ -44,6 +44,11 @@ export class GameService {
 
     // 2. 서버 로컬 배치 큐에 적재 (TICKET-003)
     // Redis 즉시 write/publish 대신 50ms 단위 배치 flush 시 원자적으로 처리된다.
+    this.logger.debug(
+      `[updatePosition] recv — playerId=${clientId} gameId=${gameId} ` +
+        `x=${newPosition[0]} y=${newPosition[1]} isAlive=${isAlive ?? '1'}`
+    );
+
     this.positionBroadcastService.enqueueUpdate(gameId, {
       playerId: clientId,
       positionX: newPosition[0],
