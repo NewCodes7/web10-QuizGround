@@ -107,8 +107,11 @@ return seq
 export class PositionBroadcastService implements OnApplicationShutdown, OnModuleInit {
   private readonly logger = new Logger(PositionBroadcastService.name);
 
-  /** Per-instance server ID prevents self-loop in multi-server pub/sub (future use). */
+  /** Per-instance server ID — used to filter self-published messages from pub/sub. */
   private readonly serverId = uuidv4();
+
+  /** Dedicated Redis connection for subscribing to position:* pub/sub channel. */
+  private positionSubscriber: Redis;
 
   private server: Namespace;
 
@@ -198,6 +201,17 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       this.luaAvailable = false;
       this.logger.warn('Lua script load failed — using non-atomic pipeline fallback');
     }
+
+    // Subscribe to position:* pub/sub channel to receive position batches from other WAS instances.
+    // Self-published messages are filtered by serverId so they are not double-broadcast.
+    this.positionSubscriber = this.redis.duplicate();
+    await this.positionSubscriber.psubscribe('position:*');
+    this.positionSubscriber.on('pmessage', (_pattern, channel, message) => {
+      this.handlePositionMessage(channel, message).catch((err) => {
+        this.logger.error(`[positionSub] handler error: ${(err as Error).message}`);
+      });
+    });
+    this.logger.verbose(`Position pub/sub subscriber started (serverId: ${this.serverId})`);
   }
 
   /**
@@ -235,6 +249,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     for (const slot of this.outTimers) {
       if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
       if (slot.interval) clearInterval(slot.interval);
+    }
+    if (this.positionSubscriber) {
+      this.positionSubscriber.disconnect();
     }
     this.logger.verbose('PositionBroadcastService shutdown complete');
   }
@@ -671,6 +688,70 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     ]);
 
     return seq;
+  }
+
+  /**
+   * Handles a position batch received from another WAS instance via pub/sub.
+   *
+   * Flow:
+   *   1. Filter out self-published messages (serverId === this.serverId → already handled by OUT timer).
+   *   2. Ignore if this WAS has no local clients in the room.
+   *   3. Split updates by alive/dead and broadcast with the same visibility policy as broadcastRoom.
+   */
+  private async handlePositionMessage(channel: string, rawMessage: string): Promise<void> {
+    let parsed: {
+      serverId: string;
+      gameId: string;
+      seq: number;
+      updates: Array<{ playerId: string; playerPosition: [number, number]; isAlive: string }>;
+    };
+
+    try {
+      parsed = JSON.parse(rawMessage);
+    } catch {
+      this.logger.warn(`[positionSub] invalid JSON on channel ${channel}`);
+      return;
+    }
+
+    const { serverId, gameId, seq, updates } = parsed;
+
+    // Self-published — already handled by the local OUT timer
+    if (serverId === this.serverId) return;
+
+    // No local clients in this room on this WAS — nothing to broadcast
+    if (!this.localClientCounts.has(gameId)) return;
+
+    // Server may not be initialized yet (rare: message before afterInit)
+    if (!this.server) return;
+
+    const aliveUpdates: PositionUpdate[] = [];
+    const deadMessages: PositionMessage[] = [];
+
+    for (const u of updates) {
+      if (u.isAlive === SurvivalStatus.ALIVE) {
+        aliveUpdates.push({ playerId: u.playerId, playerPosition: u.playerPosition });
+      } else {
+        deadMessages.push({
+          playerId: u.playerId,
+          positionX: u.playerPosition[0],
+          positionY: u.playerPosition[1],
+          gameId,
+          isAlive: u.isAlive
+        });
+      }
+    }
+
+    if (aliveUpdates.length > 0) {
+      this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+    }
+    if (deadMessages.length > 0) {
+      await this.broadcastToDeadPlayers(gameId, seq, deadMessages);
+    }
+
+    this.logger.debug(
+      `[positionSub] remote broadcast — gameId=${gameId} seq=${seq} ` +
+        `alive=${aliveUpdates.length} dead=${deadMessages.length} fromServer=${serverId.slice(0, 8)}`
+    );
   }
 
   private async broadcastToDeadPlayers(

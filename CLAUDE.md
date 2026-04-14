@@ -68,7 +68,7 @@ npm run lint               # eslint
 ## Architecture
 
 ### Distributed WAS
-WAS runs as multiple distributed instances. All game state (rooms, player sessions, scores) is stored in Redis so any server can serve any request — Redis is the source of truth for session consistency. Exception: `updatePosition` bypasses Redis pub/sub and pushes directly to the local `PositionBatchProcessor`, so position updates are not propagated across servers (Socket.IO Redis Adapter needed for full horizontal scaling).
+WAS runs as multiple distributed instances. All game state (rooms, player sessions, scores) is stored in Redis so any server can serve any request — Redis is the source of truth for session consistency. Position updates are batch-written to Redis and published to `position:{gameId}` pub/sub so every WAS instance with local clients in that room broadcasts to its own sockets. Self-published messages are filtered by `serverId` to prevent double-broadcast.
 
 ### Game Flow
 ```
