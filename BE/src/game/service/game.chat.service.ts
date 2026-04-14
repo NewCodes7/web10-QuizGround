@@ -264,7 +264,7 @@ export class GameChatService implements OnApplicationShutdown {
         'COUNT' as any,
         RETRANSMIT_MAX_COUNT as any
       )) as [string, string[]][];
-      messages = this.parseStreamEntries(entries)
+      messages = this._parseStreamEntries(entries)
         .filter((m) => !isAliveRequester || m.isAlive === SurvivalStatus.ALIVE)
         .map((m) => ({
           playerId: m.playerId,
@@ -391,7 +391,7 @@ export class GameChatService implements OnApplicationShutdown {
 
       if (entries.length === 0) return;
 
-      const parsed = this.parseStreamEntries(entries);
+      const parsed = this._parseStreamEntries(entries);
 
       // 마지막으로 읽은 stream ID 갱신
       this.lastStreamIdMap.set(gameId, entries[entries.length - 1][0]);
@@ -449,7 +449,7 @@ export class GameChatService implements OnApplicationShutdown {
     }
   }
 
-  private parseStreamEntries(
+  private _parseStreamEntries(
     entries: [string, string[]][]
   ): (ChatBroadcastMessage & { isAlive: string; streamEntryId: string })[] {
     return entries.map(([id, fields]) => {
@@ -534,7 +534,7 @@ export class GameChatService implements OnApplicationShutdown {
         return;
       }
 
-      const rows = this.parseStreamEntries(entries).map((m) => ({
+      const rows = this._parseStreamEntries(entries).map((m) => ({
         gameId,
         streamEntryId: m.streamEntryId,
         playerId: m.playerId,
