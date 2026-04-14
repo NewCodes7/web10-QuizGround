@@ -16,7 +16,9 @@ const SocketEvents = {
   GET_SELF_ID: 'getSelfId',
   UPDATE_HOST: 'updateHost',
   RETRANSMIT_POSITION: 'retransmitPosition',
-  POSITION_RETRANSMIT_RESPONSE: 'positionRetransmitResponse'
+  POSITION_RETRANSMIT_RESPONSE: 'positionRetransmitResponse',
+  RETRANSMIT_CHAT: 'retransmitChat',
+  CHAT_RETRANSMIT_RESPONSE: 'chatRetransmitResponse'
 } as const;
 
 export default SocketEvents;

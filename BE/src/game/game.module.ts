@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { GameGateway } from './game.gateway';
 import { GameService } from './service/game.service';
 import { RedisModule } from '@nestjs-modules/ioredis';
@@ -18,11 +19,11 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthModule } from '../auth/auth.module';
 import { SocketEventLoggerInterceptor } from '../common/interceptor/SocketEventLoggerInterceptor';
 import { SystemMetricsService } from '../common/service/SystemMetricsService';
-import { BatchProcessor } from './service/batch.processor';
 import { PositionBroadcastService } from './service/position-broadcast.service';
+import { ChatMessageModel } from './entities/chat-message.entity';
 
 @Module({
-  imports: [RedisModule, QuizSetModule, JwtModule, AuthModule],
+  imports: [RedisModule, QuizSetModule, JwtModule, AuthModule, TypeOrmModule.forFeature([ChatMessageModel])],
   providers: [
     GameGateway,
     GameService,
@@ -39,7 +40,6 @@ import { PositionBroadcastService } from './service/position-broadcast.service';
     RoomCleanupSubscriber,
     SocketEventLoggerInterceptor,
     SystemMetricsService,
-    BatchProcessor,
     PositionBroadcastService
   ],
   exports: [GameService]

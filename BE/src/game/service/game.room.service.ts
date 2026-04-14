@@ -13,6 +13,7 @@ import { KickRoomDto } from '../dto/kick-room.dto';
 import { TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
 import { SurvivalStatus } from '../../common/constants/game';
 import { PositionBroadcastService } from './position-broadcast.service';
+import { GameChatService } from './game.chat.service';
 
 @TraceClass()
 @Injectable()
@@ -23,7 +24,8 @@ export class GameRoomService {
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private readonly gameValidator: GameValidator,
-    private readonly positionBroadcastService: PositionBroadcastService
+    private readonly positionBroadcastService: PositionBroadcastService,
+    private readonly gameChatService: GameChatService
   ) {}
 
   async createRoom(gameConfig: CreateGameDto, clientId: string): Promise<string> {
@@ -77,6 +79,7 @@ export class GameRoomService {
 
       client.join(gameId);
       this.positionBroadcastService.onRoomJoined(gameId);
+      this.gameChatService.onRoomJoined(gameId);
 
       await this.redis.set(`${REDIS_KEY.PLAYER(clientId)}:Changes`, 'SocketID');
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
@@ -102,26 +105,34 @@ export class GameRoomService {
 
     client.join(gameId); //validation 후에 조인해야함
     this.positionBroadcastService.onRoomJoined(gameId);
+    this.gameChatService.onRoomJoined(gameId);
 
-    const positionX = Math.random();
-    const positionY = Math.random();
+    // onRoomJoined 이후 예외가 발생하면 onRoomLeft를 호출해 카운트 불균형을 방지한다.
+    try {
+      const positionX = Math.random();
+      const positionY = Math.random();
 
-    await this.redis.set(`${playerKey}:Changes`, 'Join');
-    await this.redis.hset(playerKey, {
-      playerName: '', //이래야 프론트에서 모달을 띄워주는 조건
-      positionX: positionX.toString(),
-      positionY: positionY.toString(),
-      disconnected: '0',
-      gameId: gameId,
-      isAlive: SurvivalStatus.ALIVE,
-      socketId: client.id
-    });
+      await this.redis.set(`${playerKey}:Changes`, 'Join');
+      await this.redis.hset(playerKey, {
+        playerName: '', //이래야 프론트에서 모달을 띄워주는 조건
+        positionX: positionX.toString(),
+        positionY: positionY.toString(),
+        disconnected: '0',
+        gameId: gameId,
+        isAlive: SurvivalStatus.ALIVE,
+        socketId: client.id
+      });
 
-    await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
-    await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
+      await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
+      await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
 
-    this.logger.verbose(`게임 방 입장 완료: ${gameId} - ${clientId}`);
-    await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
+      this.logger.verbose(`게임 방 입장 완료: ${gameId} - ${clientId}`);
+      await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
+    } catch (err) {
+      this.positionBroadcastService.onRoomLeft(gameId);
+      this.gameChatService.onRoomLeft(gameId);
+      throw err;
+    }
   }
 
   async sendCurrentInformation(
@@ -210,6 +221,7 @@ export class GameRoomService {
     // 게임 상태와 무관하게 로컬 클라이언트 카운트 감소
     if (roomId) {
       this.positionBroadcastService.onRoomLeft(roomId);
+      this.gameChatService.onRoomLeft(roomId);
     }
 
     const roomKey = REDIS_KEY.ROOM(roomId);

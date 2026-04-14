@@ -10,7 +10,9 @@ const SocketEvents = {
   END_QUIZ_TIME: 'endQuizTime',
   START_QUIZ_TIME: 'startQuizTime',
   UPDATE_SCORE: 'updateScore',
-  KICK_ROOM: 'kickRoom'
+  KICK_ROOM: 'kickRoom',
+  RETRANSMIT_CHAT: 'retransmitChat',
+  CHAT_RETRANSMIT_RESPONSE: 'chatRetransmitResponse'
 } as const;
 
 export default SocketEvents;

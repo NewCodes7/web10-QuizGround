@@ -11,6 +11,25 @@ type ChatMessageResponse = {
   timestamp: number;
 };
 
+/** 서버가 클라이언트에게 보내는 배치 브로드캐스트 포맷 */
+type ChatBatchResponse = {
+  seq: number;
+  messages: ChatMessageResponse[];
+  /** dead 발신자 메시지 전용. true이면 현재 플레이어가 dead일 때만 렌더링 */
+  isDeadOnly?: boolean;
+};
+
+type RetransmitChatRequest = {
+  gameId: string;
+  lastSeq: number;
+};
+
+type ChatRetransmitResponse = {
+  seq: number;
+  messages: ChatMessageResponse[];
+  isFallback: boolean;
+};
+
 // 플레이어 위치 업데이트 타입
 type UpdatePositionRequest = {
   gameId: string;
@@ -149,7 +168,15 @@ type UpdateHostResponse = {
 export type SocketDataMap = {
   chatMessage: {
     request: ChatMessageRequest;
-    response: ChatMessageResponse | ChatMessageResponse[];
+    response: ChatBatchResponse | ChatMessageResponse | ChatMessageResponse[];
+  };
+  retransmitChat: {
+    request: RetransmitChatRequest;
+    response: null;
+  };
+  chatRetransmitResponse: {
+    request: null;
+    response: ChatRetransmitResponse;
   };
   updatePosition: {
     request: UpdatePositionRequest;

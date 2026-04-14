@@ -28,6 +28,7 @@ import { ExceptionMessage } from '../common/constants/exception-message';
 import { MetricInterceptor } from '../metric/metric.interceptor';
 import { PositionBroadcastService } from './service/position-broadcast.service';
 import { RetransmitPositionDto } from './dto/retransmit-position.dto';
+import { RetransmitChatDto } from './dto/retransmit-chat.dto';
 
 @UseInterceptors(MetricInterceptor)
 @UseInterceptors(GameActivityInterceptor)
@@ -89,6 +90,15 @@ export class GameGateway {
     await this.gameChatService.chatMessage(chatMessage, client.data.playerId);
   }
 
+  @SubscribeMessage(SocketEvents.RETRANSMIT_CHAT)
+  @UsePipes(new GameValidationPipe(SocketEvents.RETRANSMIT_CHAT))
+  async handleRetransmitChat(
+    @MessageBody() dto: RetransmitChatDto,
+    @ConnectedSocket() client: Socket
+  ): Promise<void> {
+    await this.gameChatService.handleRetransmit(dto, client.data.playerId, client);
+  }
+
   @SubscribeMessage(SocketEvents.UPDATE_ROOM_OPTION)
   @UsePipes(new GameValidationPipe(SocketEvents.UPDATE_ROOM_OPTION))
   async handleUpdateRoomOption(
@@ -142,13 +152,13 @@ export class GameGateway {
     this.gameService.subscribeRedisEvent(this.server).then(() => {
       this.logger.verbose('Redis 이벤트 등록 완료했어요!');
     });
-    this.gameChatService.subscribeChatEvent(this.server).then(() => {
-      this.logger.verbose('Redis Chat 이벤트 등록 완료했어요!');
-    });
-
     // Position batch timer slots 시작 (TICKET-003/007)
     this.positionBroadcastService.initTimers(this.server);
     this.logger.verbose('Position broadcast timer slots 초기화 완료했어요!');
+
+    // Chat Streams timer slots 시작
+    this.gameChatService.initTimers(this.server);
+    this.logger.verbose('Chat Streams timer slots 초기화 완료했어요!');
 
     this.server.server.engine.on('headers', (headers, request) => {
       this.initialHeaders(headers, request);

@@ -20,5 +20,13 @@ export const REDIS_KEY = {
   ROOM_SEQ: (gameId: string) => `Room:${gameId}:Seq`,
 
   // 최근 N개 배치 로그 — Redis List (RPUSH/LTRIM, TICKET-006)
-  ROOM_POSITION_LOG: (gameId: string) => `Room:${gameId}:PositionLog`
+  ROOM_POSITION_LOG: (gameId: string) => `Room:${gameId}:PositionLog`,
+
+  // 채팅 Redis Streams 키
+  ROOM_CHAT_STREAM: (gameId: string) => `Room:${gameId}:Chat`,
+  ROOM_CHAT_SEQ: (gameId: string) => `Room:${gameId}:ChatSeq`,
+
+  // 채팅 MySQL 영속화 — 분산 락 + 커서
+  ROOM_CHAT_PERSIST_LOCK: (gameId: string) => `Room:${gameId}:ChatPersistLock`,
+  ROOM_CHAT_PERSIST_CURSOR: (gameId: string) => `Room:${gameId}:ChatPersistCursor`
 };

@@ -8,14 +8,63 @@ import QuizState from '@/constants/quizState';
 import { getQuizSetDetail } from '@/api/rest/quizApi';
 import { getEmojiByUUID } from '../utils/emoji';
 
-// chat
+// ── chat ──────────────────────────────────────────────────────────────────────
+// 방 단위 마지막으로 받은 chat seq 추적 (gap 감지용)
+const chatSeqMap = new Map<string, number>();
+// 방 단위 재전송 요청 in-flight 여부 (중복 요청 방지)
+const chatRetransmitPending = new Set<string>();
+
 socketService.on('chatMessage', (data) => {
-  if (Array.isArray(data)) {
-    data.forEach((e) => {
-      useChatStore.getState().addMessage(e);
-    });
+  const isNewFormat =
+    data !== null &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    'messages' in data;
+
+  if (isNewFormat) {
+    const batchData = data as { seq?: number; messages: { playerId: string; playerName: string; message: string; timestamp: number }[]; isDeadOnly?: boolean };
+    const { seq, messages, isDeadOnly } = batchData;
+    const gameId = useRoomStore.getState().gameId;
+
+    // isDeadOnly=true: dead 발신자 메시지. 현재 플레이어가 alive이면 렌더링하지 않는다.
+    if (isDeadOnly) {
+      const { players, currentPlayerId } = usePlayerStore.getState();
+      const currentPlayerIsAlive = players.get(currentPlayerId)?.isAlive ?? true;
+      if (currentPlayerIsAlive) return;
+      useChatStore.getState().addMessages(messages);
+      return;
+    }
+
+    // alive 발신자 메시지: seq gap 감지 및 retransmit 요청
+    if (seq !== undefined && gameId) {
+      const last = chatSeqMap.get(gameId) ?? 0;
+      // gap 감지: pending이 없을 때만 재전송 요청
+      if (last > 0 && seq > last + 1 && !chatRetransmitPending.has(gameId)) {
+        chatRetransmitPending.add(gameId);
+        socketService.emit('retransmitChat', { gameId, lastSeq: last });
+      }
+      if (seq > last) {
+        chatSeqMap.set(gameId, seq);
+      }
+    }
+
+    useChatStore.getState().addMessages(messages);
+  } else if (Array.isArray(data)) {
+    // 구 포맷 호환
+    data.forEach((e) => useChatStore.getState().addMessage(e));
   } else {
     useChatStore.getState().addMessage(data);
+  }
+});
+
+socketService.on('chatRetransmitResponse', (data) => {
+  const gameId = useRoomStore.getState().gameId;
+  if (gameId) {
+    chatRetransmitPending.delete(gameId);
+    chatSeqMap.set(gameId, Math.max(chatSeqMap.get(gameId) ?? 0, data.seq));
+  }
+  if (data.messages && data.messages.length > 0) {
+    useChatStore.getState().addMessages(data.messages);
   }
 });
 
@@ -37,6 +86,8 @@ socketService.on('joinRoom', (data) => {
   if (gameId) {
     roomSeqMap.delete(gameId);
     retransmitPending.delete(gameId);
+    chatSeqMap.delete(gameId);
+    chatRetransmitPending.delete(gameId);
   }
   playerAppliedSeqMap.clear();
 
@@ -224,4 +275,6 @@ socketService.on('disconnect', () => {
   playerAppliedSeqMap.clear();
   // TICKET-008: disconnect 시 pending 상태도 초기화
   retransmitPending.clear();
+  chatSeqMap.clear();
+  chatRetransmitPending.clear();
 });

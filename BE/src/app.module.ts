@@ -10,6 +10,7 @@ import { QuizModel } from './quiz-set/entities/quiz.entity';
 import { QuizChoiceModel } from './quiz-set/entities/quiz-choice.entity';
 import { UserModel } from './user/entities/user.entity';
 import { UserQuizArchiveModel } from './user/entities/user-quiz-archive.entity';
+import { ChatMessageModel } from './game/entities/chat-message.entity';
 import { InitDBModule } from './InitDB/InitDB.module';
 import { UserModule } from './user/user.module';
 import { QuizSetModule } from './quiz-set/quiz-set.module';
@@ -38,7 +39,7 @@ import { MetricModule } from './metric/metric.module';
       username: process.env.DB_USER || 'root',
       password: process.env.DB_PASSWD || 'test',
       database: process.env.DB_NAME || 'test_db',
-      entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel],
+      entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel, ChatMessageModel],
       synchronize: process.env.DEV ? true : false, // 개발 모드에서만 활성화
       logging: true, // 모든 쿼리 로깅
       logger: 'advanced-console'
