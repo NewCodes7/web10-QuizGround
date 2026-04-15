@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import Redis from 'ioredis';
 import { InjectRedis } from '@nestjs-modules/ioredis';
@@ -56,9 +56,22 @@ const CHAT_PERSIST_INTERVAL = 60_000;
 /** 분산 락 TTL — 영속화 주기보다 약간 길게 설정해 WAS 크래시 시 자동 해제 */
 const CHAT_PERSIST_LOCK_TTL_SEC = 70;
 
+/**
+ * 분산 락 해제 Lua 스크립트.
+ * 락 소유자인 경우에만 원자적으로 DEL한다 (TOCTOU 방지).
+ * onModuleInit에서 SCRIPT LOAD로 SHA를 사전 등록해 EVALSHA로 재사용한다.
+ */
+const LUA_RELEASE_LOCK = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+else
+  return 0
+end
+`;
+
 @TraceClass()
 @Injectable()
-export class GameChatService implements OnApplicationShutdown {
+export class GameChatService implements OnApplicationShutdown, OnModuleInit {
   private readonly logger = new Logger(GameChatService.name);
 
   /** WAS 인스턴스 고유 ID — 분산 락 소유자 식별용 */
@@ -90,6 +103,12 @@ export class GameChatService implements OnApplicationShutdown {
   /** 로컬 클라이언트 카운트: gameId → count */
   private localClientCounts = new Map<string, number>();
 
+  /** gameId → 타이머 슬롯 인덱스. cleanupRoom 에서 O(1) 삭제용. */
+  private roomSlotMap = new Map<string, number>();
+
+  /** LUA_RELEASE_LOCK 스크립트의 사전 등록 SHA (EVALSHA 용). */
+  private releaseLockSha: string;
+
   /** MySQL 영속화 주기 타이머 */
   private persistTimer: NodeJS.Timeout;
 
@@ -108,6 +127,15 @@ export class GameChatService implements OnApplicationShutdown {
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  async onModuleInit(): Promise<void> {
+    try {
+      this.releaseLockSha = (await this.redis.script('LOAD', LUA_RELEASE_LOCK)) as string;
+      this.logger.verbose(`Release-lock Lua script loaded (SHA: ${this.releaseLockSha})`);
+    } catch {
+      this.logger.warn('Lua SCRIPT LOAD failed — persistRoom will use EVAL fallback');
+    }
+  }
 
   /**
    * GameGateway.afterInit에서 호출. 슬롯 기반 타이머를 시작한다.
@@ -199,32 +227,37 @@ export class GameChatService implements OnApplicationShutdown {
   async chatMessage(chatMessage: ChatMessageDto, clientId: string): Promise<void> {
     const { gameId, message } = chatMessage;
 
-    const room = await this.redis.hgetall(REDIS_KEY.ROOM(gameId));
-    this.gameValidator.validateRoomExists(SocketEvents.CHAT_MESSAGE, room);
+    // Room(title만) + Player(gameId·playerName·isAlive) 를 병렬로 조회한다.
+    // HGETALL 대비 필요한 필드만 가져오고 RTT도 1회로 단축된다.
+    const [[roomTitle], [playerGameId, playerName, isAlive]] = await Promise.all([
+      this.redis.hmget(REDIS_KEY.ROOM(gameId), 'title'),
+      this.redis.hmget(REDIS_KEY.PLAYER(clientId), 'gameId', 'playerName', 'isAlive')
+    ]);
 
-    const player = await this.redis.hgetall(REDIS_KEY.PLAYER(clientId));
-    this.gameValidator.validatePlayerInRoom(SocketEvents.CHAT_MESSAGE, gameId, player);
+    if (!roomTitle) {
+      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.ROOM_NOT_FOUND);
+    }
+    if (playerGameId !== gameId) {
+      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.NOT_A_PLAYER);
+    }
 
     const queue = this.inputQueue.get(gameId);
     if (!queue) {
-      // 분산 WAS 환경에서 이 인스턴스가 해당 방을 처리하지 않는 경우.
-      // 클라이언트가 재연결 후 다른 WAS에 붙어 onRoomJoined가 아직 불리지 않은 상태일 수 있다.
-      // silently drop 대신 예외를 throw해 클라이언트가 상황을 인지하게 한다.
       this.logger.warn(`[chatMessage] room ${gameId} not active on this WAS — rejected`);
       throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.UNAUTHORIZED_ROOM_ACCESS);
     }
 
     queue.push({
       playerId: clientId,
-      playerName: player.playerName,
+      playerName: playerName ?? '',
       message,
       timestamp: Date.now(),
-      isAlive: player.isAlive ?? SurvivalStatus.ALIVE
+      isAlive: isAlive ?? SurvivalStatus.ALIVE
     });
 
     this.logger.verbose(
-      `[chatMessage] Room: ${gameId} | playerId: ${clientId} | playerName: ${player.playerName}` +
-        ` | isAlive: ${player.isAlive === SurvivalStatus.ALIVE ? '생존자' : '관전자'} | Message: ${message}`
+      `[chatMessage] Room: ${gameId} | playerId: ${clientId} | playerName: ${playerName}` +
+        ` | isAlive: ${isAlive === SurvivalStatus.ALIVE ? '생존자' : '관전자'} | Message: ${message}`
     );
   }
 
@@ -235,11 +268,11 @@ export class GameChatService implements OnApplicationShutdown {
   async handleRetransmit(dto: RetransmitChatDto, playerId: string, socket: Socket): Promise<void> {
     const { gameId, lastSeq } = dto;
 
-    const [playerGameId, requesterIsAlive] = await this.redis.hmget(
-      REDIS_KEY.PLAYER(playerId),
-      'gameId',
-      'isAlive'
-    );
+    // hmget(player) 와 get(seq) 는 서로 독립적이므로 병렬로 실행한다.
+    const [[playerGameId, requesterIsAlive], currentSeqStr] = await Promise.all([
+      this.redis.hmget(REDIS_KEY.PLAYER(playerId), 'gameId', 'isAlive'),
+      this.redis.get(REDIS_KEY.ROOM_CHAT_SEQ(gameId))
+    ]);
 
     if (!playerGameId) {
       throw new GameWsException(SocketEvents.RETRANSMIT_CHAT, ExceptionMessage.NOT_A_PLAYER);
@@ -251,7 +284,6 @@ export class GameChatService implements OnApplicationShutdown {
       );
     }
 
-    const currentSeqStr = await this.redis.get(REDIS_KEY.ROOM_CHAT_SEQ(gameId));
     const currentSeq = parseInt(currentSeqStr ?? '0');
 
     if (lastSeq >= currentSeq) {
@@ -317,9 +349,11 @@ export class GameChatService implements OnApplicationShutdown {
   }
 
   private cleanupRoom(gameId: string): void {
-    for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
-      this.inTimers[i].rooms.delete(gameId);
-      this.outTimers[i].rooms.delete(gameId);
+    const idx = this.roomSlotMap.get(gameId);
+    if (idx !== undefined) {
+      this.inTimers[idx].rooms.delete(gameId);
+      this.outTimers[idx].rooms.delete(gameId);
+      this.roomSlotMap.delete(gameId);
     }
     this.inputQueue.delete(gameId);
     this.lastStreamIdMap.delete(gameId);
@@ -345,6 +379,7 @@ export class GameChatService implements OnApplicationShutdown {
     const idx = this.roomCounter % CHAT_MAX_TIMERS;
     this.inTimers[idx].rooms.add(gameId);
     this.outTimers[idx].rooms.add(gameId);
+    this.roomSlotMap.set(gameId, idx);
     this.roomCounter++;
 
     const slotSize = this.inTimers[idx].rooms.size;
@@ -378,10 +413,12 @@ export class GameChatService implements OnApplicationShutdown {
 
       const batch = localQueue.splice(0, localQueue.length);
 
-      this.logger.debug(
-        `[writeRoom] gameId=${gameId} batchSize=${batch.length} ` +
-          batch.map((m) => `${m.playerId}("${m.message.slice(0, 20)}")`).join(' ')
-      );
+      if (Logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          `[writeRoom] gameId=${gameId} batchSize=${batch.length} ` +
+            batch.map((m) => `${m.playerId}("${m.message.slice(0, 20)}")`).join(' ')
+        );
+      }
 
       const pipeline = this.redis.pipeline();
       for (const msg of batch) {
@@ -437,26 +474,32 @@ export class GameChatService implements OnApplicationShutdown {
       const parsed = this._parseStreamEntries(entries);
       this.lastStreamIdMap.set(gameId, entries[entries.length - 1][0]);
 
-      const broadcastMessages: ChatBroadcastMessage[] = parsed.map((m) => ({
-        playerId: m.playerId,
-        playerName: m.playerName,
-        message: m.message,
-        timestamp: m.timestamp
-      }));
-      const isAliveFlags = parsed.map((m) => m.isAlive === SurvivalStatus.ALIVE);
-
-      const aliveMessages = broadcastMessages.filter((_, i) => isAliveFlags[i]);
-      const deadMessages = broadcastMessages.filter((_, i) => !isAliveFlags[i]);
+      // 단일 루프로 alive/dead 분리 (기존 map×2 + filter×2 → 1회 순회)
+      const aliveMessages: ChatBroadcastMessage[] = [];
+      const deadMessages: ChatBroadcastMessage[] = [];
+      for (const m of parsed) {
+        const msg: ChatBroadcastMessage = {
+          playerId: m.playerId,
+          playerName: m.playerName,
+          message: m.message,
+          timestamp: m.timestamp
+        };
+        if (m.isAlive === SurvivalStatus.ALIVE) {
+          aliveMessages.push(msg);
+        } else {
+          deadMessages.push(msg);
+        }
+      }
 
       if (aliveMessages.length > 0 && this.server) {
         const seq = await this.redis.incr(REDIS_KEY.ROOM_CHAT_SEQ(gameId));
 
         const batchLog = this.batchLogMap.get(gameId);
         if (batchLog) {
-          batchLog.push({ seq, messages: aliveMessages, isAliveFlags: aliveMessages.map(() => true) });
-          if (batchLog.length > CHAT_BATCH_HISTORY_SIZE) {
-            batchLog.splice(0, batchLog.length - CHAT_BATCH_HISTORY_SIZE);
+          if (batchLog.length >= CHAT_BATCH_HISTORY_SIZE) {
+            batchLog.shift(); // 맨 앞 1개만 제거 — splice(0,n) 전체 시프트 대신 O(1)
           }
+          batchLog.push({ seq, messages: aliveMessages, isAliveFlags: aliveMessages.map(() => true) });
         }
 
         this.server.to(gameId).emit(SocketEvents.CHAT_MESSAGE, { seq, messages: aliveMessages });
@@ -587,17 +630,13 @@ export class GameChatService implements OnApplicationShutdown {
         `[persistRoom] saved — gameId=${gameId} count=${rows.length} cursor=${newCursor}`
       );
     } finally {
-      // 락 소유자인 경우에만 원자적으로 해제.
-      // GET + DEL을 분리하면 TTL 만료 후 다른 WAS가 획득한 락을 날릴 수 있어(TOCTOU),
-      // Lua 스크립트로 단일 명령어 내에서 확인과 삭제를 처리한다.
-      const releaseLockScript = `
-        if redis.call('get', KEYS[1]) == ARGV[1] then
-          return redis.call('del', KEYS[1])
-        else
-          return 0
-        end
-      `;
-      await this.redis.eval(releaseLockScript, 1, lockKey, this.instanceId);
+      // 락 소유자인 경우에만 원자적으로 해제 (TOCTOU 방지).
+      // SHA가 있으면 EVALSHA(캐시된 스크립트), 없으면 EVAL 폴백.
+      if (this.releaseLockSha) {
+        await (this.redis as any).evalsha(this.releaseLockSha, 1, lockKey, this.instanceId);
+      } else {
+        await this.redis.eval(LUA_RELEASE_LOCK, 1, lockKey, this.instanceId);
+      }
     }
   }
 }
