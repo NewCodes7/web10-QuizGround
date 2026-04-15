@@ -129,10 +129,8 @@ export class GameService {
     }
 
     // 게임이 시작되었음을 알림
-    await this.redis.set(`${roomKey}:Changes`, 'Start');
-    await this.redis.hset(roomKey, {
-      status: 'playing'
-    });
+    await this.redis.hset(roomKey, { status: 'playing' });
+    await this.redis.publish(`roomState:${gameId}`, JSON.stringify({ type: 'Start' }));
 
     // 첫 퀴즈 걸어주기
     await this.redis.set(REDIS_KEY.ROOM_CURRENT_QUIZ(gameId), '-1:end'); // 0:start, 0:end, 1:start, 1:end
@@ -143,11 +141,13 @@ export class GameService {
 
   async setPlayerName(setPlayerNameDto: SetPlayerNameDto, clientId: string) {
     const { playerName } = setPlayerNameDto;
+    const gameId = await this.redis.hget(REDIS_KEY.PLAYER(clientId), 'gameId');
 
-    await this.redis.set(`${REDIS_KEY.PLAYER(clientId)}:Changes`, 'Name');
-    await this.redis.hmset(REDIS_KEY.PLAYER(clientId), {
-      playerName: playerName
-    });
+    await this.redis.hmset(REDIS_KEY.PLAYER(clientId), { playerName });
+    await this.redis.publish(
+      `playerState:${gameId}`,
+      JSON.stringify({ type: 'Name', playerId: clientId, playerName, gameId })
+    );
   }
 
   async subscribeRedisEvent(server: Namespace) {

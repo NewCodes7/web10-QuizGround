@@ -70,7 +70,6 @@ export class TimerSubscriber extends RedisSubscriber {
       );
       // this.logger.verbose(selectAnswer);
 
-      await this.redis.set(`${REDIS_KEY.PLAYER(clientId)}:Changes`, 'AnswerCorrect');
       if (selectAnswer.toString() === quiz.answer) {
         correctPlayers.push(clientId);
         await this.redis.hset(REDIS_KEY.PLAYER(clientId), { isAnswerCorrect: '1' });
@@ -133,7 +132,6 @@ export class TimerSubscriber extends RedisSubscriber {
         'WITHSCORES'
       );
 
-      this.redis.set(`${REDIS_KEY.ROOM(gameId)}:Changes`, 'End');
       this.redis.hset(REDIS_KEY.ROOM(gameId), {
         host: leaderboard.at(-2),
         status: 'waiting',

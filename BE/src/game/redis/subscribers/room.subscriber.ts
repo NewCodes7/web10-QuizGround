@@ -13,44 +13,43 @@ export class RoomSubscriber extends RedisSubscriber {
 
   async subscribe(server: Namespace): Promise<void> {
     const subscriber = this.redis.duplicate();
-    await subscriber.psubscribe('__keyspace@0__:Room:*');
+    await subscriber.psubscribe('roomState:*');
 
     subscriber.on('pmessage', async (_pattern, channel, message) => {
-      const gameId = this.extractGameId(channel);
-      if (!gameId || message !== 'hset') {
+      const gameId = channel.split(':')[1];
+      if (!gameId) return;
+
+      let payload: { type: string; [key: string]: unknown };
+      try {
+        payload = JSON.parse(message);
+      } catch {
         return;
       }
 
-      const key = `Room:${gameId}`;
-      await this.handleRoomChanges(key, gameId, server);
+      this.handleRoomState(gameId, payload, server);
     });
   }
 
-  private extractGameId(channel: string): string | null {
-    const splitKey = channel.replace('__keyspace@0__:', '').split(':');
-    return splitKey.length === 2 ? splitKey[1] : null;
-  }
-
-  private async handleRoomChanges(key: string, gameId: string, server: Namespace) {
-    const changes = await this.redis.get(`${key}:Changes`);
-    await this.redis.del(`${key}:Changes`);
-    const roomData = await this.redis.hgetall(key);
-
-    switch (changes) {
+  private handleRoomState(
+    gameId: string,
+    payload: { type: string; [key: string]: unknown },
+    server: Namespace
+  ) {
+    switch (payload.type) {
       case 'Option':
         server.to(gameId).emit(SocketEvents.UPDATE_ROOM_OPTION, {
-          title: roomData.title,
-          gameMode: roomData.gameMode,
-          maxPlayerCount: parseInt(roomData.maxPlayerCount),
-          isPublic: roomData.isPublic === '1'
+          title: payload.title,
+          gameMode: payload.gameMode,
+          maxPlayerCount: payload.maxPlayerCount,
+          isPublic: payload.isPublic
         });
         this.logger.verbose(`Room option updated: ${gameId}`);
         break;
 
       case 'Quizset':
         server.to(gameId).emit(SocketEvents.UPDATE_ROOM_QUIZSET, {
-          quizSetId: roomData.quizSetId,
-          quizCount: parseInt(roomData.quizCount)
+          quizSetId: payload.quizSetId,
+          quizCount: payload.quizCount
         });
         this.logger.verbose(`Room quizset updated: ${gameId}`);
         break;
@@ -62,7 +61,7 @@ export class RoomSubscriber extends RedisSubscriber {
 
       case 'Host':
         server.to(gameId).emit(SocketEvents.UPDATE_HOST, {
-          hostId: roomData.host
+          hostId: payload.hostId
         });
         this.logger.verbose(`Update Host: ${gameId}`);
         break;

@@ -81,7 +81,6 @@ export class GameRoomService {
       this.positionBroadcastService.onRoomJoined(gameId);
       this.gameChatService.onRoomJoined(gameId);
 
-      await this.redis.set(`${REDIS_KEY.PLAYER(clientId)}:Changes`, 'SocketID');
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
@@ -112,7 +111,6 @@ export class GameRoomService {
       const positionX = Math.random();
       const positionY = Math.random();
 
-      await this.redis.set(`${playerKey}:Changes`, 'Join');
       await this.redis.hset(playerKey, {
         playerName: '', //이래야 프론트에서 모달을 띄워주는 조건
         positionX: positionX.toString(),
@@ -125,6 +123,12 @@ export class GameRoomService {
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
+
+      const isHost = (await this.redis.hget(REDIS_KEY.ROOM(gameId), 'host')) === clientId;
+      await this.redis.publish(
+        `playerState:${gameId}`,
+        JSON.stringify({ type: 'Join', playerId: clientId, playerName: '', positionX, positionY, isHost })
+      );
 
       this.logger.verbose(`게임 방 입장 완료: ${gameId} - ${clientId}`);
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
@@ -183,13 +187,16 @@ export class GameRoomService {
 
     this.gameValidator.validatePlayerIsHost(SocketEvents.UPDATE_ROOM_OPTION, room, clientId);
 
-    await this.redis.set(`${roomKey}:Changes`, 'Option');
     await this.redis.hset(roomKey, {
       title: title,
       gameMode: gameMode,
       maxPlayerCount: maxPlayerCount.toString(),
       isPublic: isPublic ? '1' : '0'
     });
+    await this.redis.publish(
+      `roomState:${gameId}`,
+      JSON.stringify({ type: 'Option', title, gameMode, maxPlayerCount, isPublic })
+    );
     this.logger.verbose(`게임방 옵션 변경: ${gameId}`);
   }
 
@@ -202,11 +209,14 @@ export class GameRoomService {
 
     this.gameValidator.validatePlayerIsHost(SocketEvents.UPDATE_ROOM_QUIZSET, room, clientId);
 
-    await this.redis.set(`${roomKey}:Changes`, 'Quizset');
     await this.redis.hset(roomKey, {
       quizSetId: quizSetId.toString(),
       quizCount: quizCount.toString()
     });
+    await this.redis.publish(
+      `roomState:${gameId}`,
+      JSON.stringify({ type: 'Quizset', quizSetId, quizCount })
+    );
     this.logger.verbose(`게임방 퀴즈셋 변경: ${gameId}`);
   }
 
@@ -238,8 +248,7 @@ export class GameRoomService {
     pipeline.srem(roomPlayersKey, clientId);
     pipeline.zrem(roomLeaderboardKey, clientId);
 
-    // 1. 플레이어 상태를 'disconnected'로 변경하고 TTL 설정
-    pipeline.set(`${playerKey}:Changes`, 'Disconnect', 'EX', 600); // 해당플레이어의 변화정보 10분 후에 삭제
+    // 1. 플레이어 상태를 'disconnected'로 변경
     pipeline.hset(REDIS_KEY.PLAYER(clientId), {
       disconnected: '1',
       disconnectedAt: Date.now().toString()
@@ -248,15 +257,21 @@ export class GameRoomService {
 
     await pipeline.exec();
 
+    await this.redis.publish(
+      `playerState:${roomId}`,
+      JSON.stringify({ type: 'Disconnect', playerId: clientId })
+    );
+
     // 호스트가 방을 나갔을 시
     const host = await this.redis.hget(roomKey, 'host');
     const players = await this.redis.smembers(roomPlayersKey);
     if (host === clientId && players.length > 0) {
       const newHost = await this.redis.srandmember(roomPlayersKey);
-      await this.redis.set(`${roomKey}:Changes`, 'Host');
-      await this.redis.hset(roomKey, {
-        host: newHost
-      });
+      await this.redis.hset(roomKey, { host: newHost });
+      await this.redis.publish(
+        `roomState:${roomId}`,
+        JSON.stringify({ type: 'Host', hostId: newHost })
+      );
     }
 
     const remainingPlayers = await this.redis.scard(roomPlayersKey);
@@ -275,13 +290,7 @@ export class GameRoomService {
    * 방 활동 업데이트
    */
   async updateRoomActivity(roomId: string): Promise<void> {
-    const pipeline = this.redis.pipeline();
-
-    pipeline.set(`${REDIS_KEY.ROOM(roomId)}:Changes`, 'lastActivityAt');
-    pipeline.hset(REDIS_KEY.ROOM(roomId), 'lastActivityAt', Date.now().toString());
-    pipeline.hget(REDIS_KEY.ROOM(roomId), 'lastActivityAt');
-
-    await pipeline.exec();
+    await this.redis.hset(REDIS_KEY.ROOM(roomId), 'lastActivityAt', Date.now().toString());
   }
 
   /**
@@ -317,10 +326,11 @@ export class GameRoomService {
     const targetPlayerKey = REDIS_KEY.PLAYER(kickPlayerId);
     const targetPlayer = await this.redis.hgetall(targetPlayerKey);
     this.gameValidator.validatePlayerExists(SocketEvents.KICK_ROOM, targetPlayer);
-    await this.redis.set(`${targetPlayerKey}:Changes`, 'Kicked', 'EX', 6000); // 해당플레이어의 변화정보 10분 후에 삭제
-    await this.redis.hset(targetPlayerKey, {
-      isAlive: '0'
-    });
+    await this.redis.hset(targetPlayerKey, { isAlive: '0' });
+    await this.redis.publish(
+      `playerState:${gameId}`,
+      JSON.stringify({ type: 'Kicked', playerId: kickPlayerId, gameId })
+    );
     // await this.handlePlayerExit(kickPlayerId);
   }
 }
