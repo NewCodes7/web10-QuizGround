@@ -1,7 +1,7 @@
 // 활동 시간 업데이트는 비즈니스 로직과 분리
 import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
 import { of } from 'rxjs';
-import { GameRoomService } from '../service/game.room.service';
+import { GameRoomService } from '../service/game-room.service';
 
 @Injectable()
 export class GameActivityInterceptor implements NestInterceptor {

@@ -2,7 +2,7 @@ import 'pinpoint-node-agent';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
-import { GameActivityInterceptor } from './game/interceptor/gameActivity.interceptor';
+import { GameActivityInterceptor } from './game/middleware/game-activity.interceptor';
 import { KstLogger } from './common/logger/kst.logger';
 
 // env 불러오기

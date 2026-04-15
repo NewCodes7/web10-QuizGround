@@ -1,20 +1,20 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GameGateway } from './game.gateway';
-import { GameService } from './service/game.service';
+import { GameSessionService } from './service/game-session.service';
 import { RedisModule } from '@nestjs-modules/ioredis';
-import { GameValidator } from './validations/game.validator';
-import { GameChatService } from './service/game.chat.service';
-import { GameRoomService } from './service/game.room.service';
-import { QuizCacheService } from './service/quiz.cache.service';
+import { GameValidator } from './middleware/game.validator';
+import { GameChatService } from './service/game-chat.service';
+import { GameRoomService } from './service/game-room.service';
+import { QuizCacheService } from './service/quiz-cache.service';
 import { QuizSetModule } from '../quiz-set/quiz-set.module';
 import { QuizSetService } from '../quiz-set/service/quiz-set.service';
-import { RedisSubscriberService } from './redis/redis-subscriber.service';
+import { SubscriberInitializerService } from './redis/subscriber-initializer.service';
 import { ScoringSubscriber } from './redis/subscribers/scoring.subscriber';
-import { TimerSubscriber } from './redis/subscribers/timer.subscriber';
-import { RoomSubscriber } from './redis/subscribers/room.subscriber';
-import { PlayerSubscriber } from './redis/subscribers/player.subscriber';
-import { RoomCleanupSubscriber } from './redis/subscribers/room.cleanup.subscriber';
+import { QuizStateMachineSubscriber } from './redis/subscribers/quiz-state-machine.subscriber';
+import { RoomStateSubscriber } from './redis/subscribers/room-state.subscriber';
+import { PlayerStateSubscriber } from './redis/subscribers/player-state.subscriber';
+import { RoomCleanupSubscriber } from './redis/subscribers/room-cleanup.subscriber';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthModule } from '../auth/auth.module';
 import { SocketEventLoggerInterceptor } from '../common/interceptor/SocketEventLoggerInterceptor';
@@ -26,22 +26,22 @@ import { ChatMessageModel } from './entities/chat-message.entity';
   imports: [RedisModule, QuizSetModule, JwtModule, AuthModule, TypeOrmModule.forFeature([ChatMessageModel])],
   providers: [
     GameGateway,
-    GameService,
+    GameSessionService,
     GameChatService,
     GameRoomService,
     GameValidator,
     QuizSetService,
     QuizCacheService,
-    RedisSubscriberService,
+    SubscriberInitializerService,
     ScoringSubscriber,
-    TimerSubscriber,
-    RoomSubscriber,
-    PlayerSubscriber,
+    QuizStateMachineSubscriber,
+    RoomStateSubscriber,
+    PlayerStateSubscriber,
     RoomCleanupSubscriber,
     SocketEventLoggerInterceptor,
     SystemMetricsService,
     PositionBroadcastService
   ],
-  exports: [GameService]
+  exports: [GameSessionService]
 })
 export class GameModule {}

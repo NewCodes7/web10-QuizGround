@@ -8,7 +8,7 @@ import SocketEvents from '../../../common/constants/socket-events';
 import { GameMode, SurvivalStatus } from '../../../common/constants/game';
 
 @Injectable()
-export class TimerSubscriber extends RedisSubscriber {
+export class QuizStateMachineSubscriber extends RedisSubscriber {
   constructor(
     @InjectRedis() redis: Redis // 부모에게 전달
   ) {

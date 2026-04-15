@@ -11,15 +11,15 @@ import { Logger, UseFilters, UseInterceptors, UsePipes } from '@nestjs/common';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
 import SocketEvents from '../common/constants/socket-events';
 import { ChatMessageDto } from './dto/chat-message.dto';
-import { GameService } from './service/game.service';
+import { GameSessionService } from './service/game-session.service';
 import { UpdatePositionDto } from './dto/update-position.dto';
-import { GameValidationPipe } from './validations/game-validation.pipe';
+import { GameValidationPipe } from './middleware/game-validation.pipe';
 import { StartGameDto } from './dto/start-game.dto';
 import { UpdateRoomOptionDto } from './dto/update-room-option.dto';
 import { UpdateRoomQuizsetDto } from './dto/update-room-quizset.dto';
-import { GameChatService } from './service/game.chat.service';
-import { GameRoomService } from './service/game.room.service';
-import { GameActivityInterceptor } from './interceptor/gameActivity.interceptor';
+import { GameChatService } from './service/game-chat.service';
+import { GameRoomService } from './service/game-room.service';
+import { GameActivityInterceptor } from './middleware/game-activity.interceptor';
 import { parse, serialize } from 'cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { SetPlayerNameDto } from './dto/set-player-name.dto';
@@ -56,7 +56,7 @@ export class GameGateway {
   private logger = new Logger('GameGateway');
 
   constructor(
-    private readonly gameService: GameService,
+    private readonly gameSessionService: GameSessionService,
     private readonly gameChatService: GameChatService,
     private readonly gameRoomService: GameRoomService,
     private readonly positionBroadcastService: PositionBroadcastService
@@ -68,7 +68,7 @@ export class GameGateway {
     @MessageBody() updatePosition: UpdatePositionDto,
     @ConnectedSocket() client: Socket
   ): Promise<void> {
-    await this.gameService.updatePosition(updatePosition, client.data.playerId);
+    await this.gameSessionService.updatePosition(updatePosition, client.data.playerId);
   }
 
   @SubscribeMessage(SocketEvents.RETRANSMIT_POSITION)
@@ -77,7 +77,6 @@ export class GameGateway {
     @MessageBody() dto: RetransmitPositionDto,
     @ConnectedSocket() client: Socket
   ): Promise<void> {
-    // TICKET-001: pass playerId so handleRetransmit can validate room membership
     await this.positionBroadcastService.handleRetransmit(dto, client.data.playerId, client);
   }
 
@@ -123,7 +122,7 @@ export class GameGateway {
     @MessageBody() startGameDto: StartGameDto,
     @ConnectedSocket() client: Socket
   ) {
-    await this.gameService.startGame(startGameDto, client.data.playerId);
+    await this.gameSessionService.startGame(startGameDto, client.data.playerId);
   }
 
   @SubscribeMessage(SocketEvents.SET_PLAYER_NAME)
@@ -132,7 +131,7 @@ export class GameGateway {
     @MessageBody() setPlayerNameDto: SetPlayerNameDto,
     @ConnectedSocket() client: Socket
   ) {
-    await this.gameService.setPlayerName(setPlayerNameDto, client.data.playerId);
+    await this.gameSessionService.setPlayerName(setPlayerNameDto, client.data.playerId);
   }
 
   @SubscribeMessage(SocketEvents.KICK_ROOM)
@@ -149,7 +148,7 @@ export class GameGateway {
     this.logger.verbose('Socket.IO Admin UI 초기화 완료했어요!');
     this.logger.verbose('WebSocket 서버 초기화 완료했어요!');
 
-    this.gameService.subscribeRedisEvent(this.server).then(() => {
+    this.gameSessionService.subscribeRedisEvent(this.server).then(() => {
       this.logger.verbose('Redis 이벤트 등록 완료했어요!');
     });
     // Position batch timer slots 시작 (TICKET-003/007)
@@ -190,7 +189,7 @@ export class GameGateway {
 
   async handleConnection(client: Socket) {
     try {
-      await this.gameService.connection(client);
+      await this.gameSessionService.connection(client);
       this.logger.verbose(`클라이언트가 연결되었어요!: ${client.data.playerId}`);
     } catch (error) {
       // 1. 에러 로깅

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
-import { GameValidator } from '../validations/game.validator';
+import { GameValidator } from '../middleware/game.validator';
 import { CreateGameDto } from '../dto/create-game.dto';
 import { REDIS_KEY } from '../../common/constants/redis-key.constant';
 import { generateUniquePin } from '../../common/utils/utils';
@@ -13,7 +13,7 @@ import { KickRoomDto } from '../dto/kick-room.dto';
 import { TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
 import { SurvivalStatus } from '../../common/constants/game';
 import { PositionBroadcastService } from './position-broadcast.service';
-import { GameChatService } from './game.chat.service';
+import { GameChatService } from './game-chat.service';
 
 @TraceClass()
 @Injectable()

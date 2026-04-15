@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GameValidator } from '../validations/game.validator';
+import { GameValidator } from '../middleware/game.validator';
 import { ChatMessageModel } from '../entities/chat-message.entity';
 import { ChatMessageDto } from '../dto/chat-message.dto';
 import { REDIS_KEY } from '../../common/constants/redis-key.constant';

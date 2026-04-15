@@ -3,29 +3,29 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 import { REDIS_KEY } from '../../common/constants/redis-key.constant';
 import { UpdatePositionDto } from '../dto/update-position.dto';
-import { GameValidator } from '../validations/game.validator';
+import { GameValidator } from '../middleware/game.validator';
 import SocketEvents from '../../common/constants/socket-events';
 import { StartGameDto } from '../dto/start-game.dto';
 import { Namespace, Socket } from 'socket.io';
 import { mockQuizData } from '../../../test/mocks/quiz-data.mock';
-import { QuizCacheService } from './quiz.cache.service';
-import { RedisSubscriberService } from '../redis/redis-subscriber.service';
+import { QuizCacheService } from './quiz-cache.service';
+import { SubscriberInitializerService } from '../redis/subscriber-initializer.service';
 import { parseHeaderToObject } from '../../common/utils/utils';
-import { GameRoomService } from './game.room.service';
+import { GameRoomService } from './game-room.service';
 import { SetPlayerNameDto } from '../dto/set-player-name.dto';
 import { Trace, TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
 import { PositionBroadcastService } from './position-broadcast.service';
 
 @TraceClass()
 @Injectable()
-export class GameService {
-  private readonly logger = new Logger(GameService.name);
+export class GameSessionService {
+  private readonly logger = new Logger(GameSessionService.name);
 
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private readonly gameValidator: GameValidator,
     private readonly quizCacheService: QuizCacheService,
-    private readonly redisSubscriberService: RedisSubscriberService,
+    private readonly redisSubscriberService: SubscriberInitializerService,
     private readonly gameRoomService: GameRoomService,
     private readonly positionBroadcastService: PositionBroadcastService
   ) {}

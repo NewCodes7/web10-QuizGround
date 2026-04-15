@@ -5,8 +5,8 @@ import { REDIS_KEY } from '../../common/constants/redis-key.constant';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
-export class GameRedisMemoryService {
-  private readonly logger = new Logger(GameRedisMemoryService.name);
+export class InactiveRoomScheduler {
+  private readonly logger = new Logger(InactiveRoomScheduler.name);
   private readonly BATCH_SIZE = 100; // 한 번에 처리할 배치 크기
   private readonly INACTIVE_THRESHOLD = 30 * 60 * 1000; // 30분 30 * 60 * 1000;
 

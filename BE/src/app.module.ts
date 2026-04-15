@@ -19,7 +19,7 @@ import { TimeController } from './time/time.controller';
 import { TimeModule } from './time/time.module';
 import { AuthModule } from './auth/auth.module';
 import { ScheduleModule } from '@nestjs/schedule';
-import { GameRedisMemoryService } from './game/redis/game-redis-memory.service';
+import { InactiveRoomScheduler } from './game/redis/inactive-room.scheduler';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { MetricModule } from './metric/metric.module';
 
@@ -63,7 +63,7 @@ import { MetricModule } from './metric/metric.module';
   controllers: [AppController, TimeController],
   providers: [
     AppService,
-    GameRedisMemoryService,
+    InactiveRoomScheduler,
     {
       provide: APP_INTERCEPTOR,
       useClass: ClassSerializerInterceptor

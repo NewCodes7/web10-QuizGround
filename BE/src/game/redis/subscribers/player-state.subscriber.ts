@@ -6,7 +6,7 @@ import { Namespace } from 'socket.io';
 import SocketEvents from '../../../common/constants/socket-events';
 
 @Injectable()
-export class PlayerSubscriber extends RedisSubscriber {
+export class PlayerStateSubscriber extends RedisSubscriber {
   constructor(@InjectRedis() redis: Redis) {
     super(redis);
   }
