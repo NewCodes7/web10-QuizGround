@@ -6,11 +6,13 @@ import { Namespace } from 'socket.io';
 import { REDIS_KEY } from '../../../common/constants/redis-key.constant';
 import SocketEvents from '../../../common/constants/socket-events';
 import { GameMode, SurvivalStatus } from '../../../common/constants/game';
+import { PositionBroadcastService } from '../../service/position-broadcast.service';
 
 @Injectable()
 export class QuizStateMachineSubscriber extends RedisSubscriber {
   constructor(
-    @InjectRedis() redis: Redis // 부모에게 전달
+    @InjectRedis() redis: Redis, // 부모에게 전달
+    private readonly positionBroadcastService: PositionBroadcastService
   ) {
     super(redis);
   }
@@ -95,6 +97,7 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
       inCorrectPlayers.forEach((clientId) => {
         this.redis.zadd(leaderboardKey, 0, clientId);
         this.redis.hset(REDIS_KEY.PLAYER(clientId), { isAlive: '0' });
+        this.positionBroadcastService.onPlayerDied(gameId, clientId);
       });
     }
 

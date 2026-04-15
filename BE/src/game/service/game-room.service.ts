@@ -84,6 +84,7 @@ export class GameRoomService {
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
+      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
 
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
       return;
@@ -120,6 +121,7 @@ export class GameRoomService {
         isAlive: SurvivalStatus.ALIVE,
         socketId: client.id
       });
+      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
@@ -231,6 +233,7 @@ export class GameRoomService {
     // 게임 상태와 무관하게 로컬 클라이언트 카운트 감소
     if (roomId) {
       this.positionBroadcastService.onRoomLeft(roomId);
+      this.positionBroadcastService.onPlayerLeft(roomId, clientId);
       this.gameChatService.onRoomLeft(roomId);
     }
 
@@ -327,6 +330,7 @@ export class GameRoomService {
     const targetPlayer = await this.redis.hgetall(targetPlayerKey);
     this.gameValidator.validatePlayerExists(SocketEvents.KICK_ROOM, targetPlayer);
     await this.redis.hset(targetPlayerKey, { isAlive: '0' });
+    this.positionBroadcastService.onPlayerDied(gameId, kickPlayerId);
     await this.redis.publish(
       `playerState:${gameId}`,
       JSON.stringify({ type: 'Kicked', playerId: kickPlayerId, gameId })

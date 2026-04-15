@@ -118,6 +118,15 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /** Number of clients from this server currently in each room. */
   private localClientCounts = new Map<string, number>();
 
+  /** gameId → playerId → socketId. 로컬 클라이언트의 소켓 ID 역매핑. */
+  private playerSocketMap = new Map<string, Map<string, string>>();
+
+  /** gameId → Set<playerId>. 탈락한 플레이어 집합 (서바이벌 모드). */
+  private deadPlayerIds = new Map<string, Set<string>>();
+
+  /** gameId → 타이머 슬롯 인덱스. cleanupRoom 에서 O(1) 삭제용. */
+  private roomSlotMap = new Map<string, number>();
+
   /**
    * IN 타이머: inputQueue → Redis 쓰기 (execFlush)
    * OUT 타이머: pendingBroadcasts → socket.io emit
@@ -273,6 +282,41 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   }
 
   /**
+   * 플레이어가 이 WAS에 접속했을 때 호출. 재접속 시 socketId를 덮어쓴다.
+   * GameRoomService.joinRoom 에서 socketId 가 Redis에 기록된 직후 호출한다.
+   */
+  onPlayerJoined(gameId: string, playerId: string, socketId: string): void {
+    let playerMap = this.playerSocketMap.get(gameId);
+    if (!playerMap) {
+      playerMap = new Map();
+      this.playerSocketMap.set(gameId, playerMap);
+    }
+    playerMap.set(playerId, socketId);
+  }
+
+  /**
+   * 플레이어가 방을 나갔을 때 호출.
+   * GameRoomService.handlePlayerExit 에서 호출한다.
+   */
+  onPlayerLeft(gameId: string, playerId: string): void {
+    this.playerSocketMap.get(gameId)?.delete(playerId);
+    this.deadPlayerIds.get(gameId)?.delete(playerId);
+  }
+
+  /**
+   * 플레이어가 탈락했을 때 호출 (서바이벌 오답 / 강퇴).
+   * QuizStateMachineSubscriber 및 GameRoomService.kickRoom 에서 호출한다.
+   */
+  onPlayerDied(gameId: string, playerId: string): void {
+    let deadSet = this.deadPlayerIds.get(gameId);
+    if (!deadSet) {
+      deadSet = new Set();
+      this.deadPlayerIds.set(gameId, deadSet);
+    }
+    deadSet.add(playerId);
+  }
+
+  /**
    * Called by GameRoomService when a client from this server leaves a room.
    * On last client: removes the input queue and all associated state (TICKET-007).
    */
@@ -296,15 +340,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   enqueueUpdate(gameId: string, message: PositionMessage): void {
     const queue = this.inputQueue.get(gameId);
     if (!queue) return; // room not active on this server
-    const wasOverwritten = queue.has(message.playerId);
     queue.set(message.playerId, message);
-    this.inputQueueSizeGauge.labels(gameId).set(queue.size);
-
-    this.logger.debug(
-      `[enqueueUpdate] gameId=${gameId} playerId=${message.playerId} ` +
-        `x=${message.positionX} y=${message.positionY} isAlive=${message.isAlive} ` +
-        `queueSize=${queue.size} overwritten=${wasOverwritten}`
-    );
   }
 
   // ── Retransmit (TICKET-001, 002, 006) ─────────────────────────────────────
@@ -328,12 +364,12 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   async handleRetransmit(dto: RetransmitPositionDto, playerId: string, socket: Socket): Promise<void> {
     const { gameId, lastSeq } = dto;
 
-    // TICKET-001: verify the player belongs to this room
-    const [playerGameId, requesterIsAlive] = await this.redis.hmget(
-      REDIS_KEY.PLAYER(playerId),
-      'gameId',
-      'isAlive'
-    );
+    // TICKET-001, 004, 006: 세 Redis 호출은 서로 독립적이므로 병렬로 실행한다.
+    const [[playerGameId, requesterIsAlive], currentSeqStr, rawEntries] = await Promise.all([
+      this.redis.hmget(REDIS_KEY.PLAYER(playerId), 'gameId', 'isAlive'),
+      this.redis.get(REDIS_KEY.ROOM_SEQ(gameId)),
+      this.redis.lrange(REDIS_KEY.ROOM_POSITION_LOG(gameId), 0, -1)
+    ]);
 
     if (!playerGameId) {
       throw new GameWsException(SocketEvents.RETRANSMIT_POSITION, ExceptionMessage.NOT_A_PLAYER);
@@ -351,16 +387,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       `[handleRetransmit] recv — playerId=${playerId} gameId=${gameId} lastSeq=${lastSeq}`
     );
 
-    // Get authoritative seq from Redis (TICKET-004)
-    const currentSeqStr = await this.redis.get(REDIS_KEY.ROOM_SEQ(gameId));
     const currentSeq = parseInt(currentSeqStr ?? '0');
 
     if (lastSeq >= currentSeq) {
       return; // nothing to retransmit
     }
-
-    // Fetch Redis position log (TICKET-006)
-    const rawEntries = await this.redis.lrange(REDIS_KEY.ROOM_POSITION_LOG(gameId), 0, -1);
     type LogUpdate = { playerId: string; positionX: number; positionY: number; isAlive: string };
     type LogEntry = { seq: number; updates: LogUpdate[] };
     const logEntries: LogEntry[] = rawEntries.map((e) => JSON.parse(e));
@@ -450,14 +481,16 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    * Also deletes Redis seq and log keys so stale data does not persist (TICKET-007).
    */
   private cleanupRoom(gameId: string): void {
-    for (const slot of this.inTimers) {
-      slot.rooms.delete(gameId);
-    }
-    for (const slot of this.outTimers) {
-      slot.rooms.delete(gameId);
+    const idx = this.roomSlotMap.get(gameId);
+    if (idx !== undefined) {
+      this.inTimers[idx].rooms.delete(gameId);
+      this.outTimers[idx].rooms.delete(gameId);
+      this.roomSlotMap.delete(gameId);
     }
     this.inputQueue.delete(gameId);
     this.pendingBroadcasts.delete(gameId);
+    this.playerSocketMap.delete(gameId);
+    this.deadPlayerIds.delete(gameId);
     this.inputQueueSizeGauge.labels(gameId).set(0);
 
     this.redis
@@ -474,6 +507,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const idx = this.roomCounter % POSITION_MAX_TIMERS;
     this.inTimers[idx].rooms.add(gameId);
     this.outTimers[idx].rooms.add(gameId);
+    this.roomSlotMap.set(gameId, idx);
     this.roomCounter++;
 
     const slotSize = this.inTimers[idx].rooms.size;
@@ -504,14 +538,17 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
     const writeStart = Date.now();
     const batch = Array.from(localQueue.values());
+    this.inputQueueSizeGauge.labels(gameId).set(batch.length);
     localQueue.clear();
     this.inputQueueSizeGauge.labels(gameId).set(0);
     this.flushUpdatesCounter.labels(gameId).inc(batch.length);
 
-    this.logger.debug(
-      `[writeRoom] redis write — gameId=${gameId} batchSize=${batch.length} ` +
-        batch.map((m) => `${m.playerId}(${m.positionX},${m.positionY})`).join(' ')
-    );
+    if (Logger.isLevelEnabled('debug')) {
+      this.logger.debug(
+        `[writeRoom] redis write — gameId=${gameId} batchSize=${batch.length} ` +
+          batch.map((m) => `${m.playerId}(${m.positionX},${m.positionY})`).join(' ')
+      );
+    }
 
     let seq: number;
     try {
@@ -573,7 +610,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
         this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
       }
       if (deadMessages.length > 0) {
-        await this.broadcastToDeadPlayers(gameId, seq, deadMessages);
+        this.broadcastToDeadPlayers(gameId, seq, deadMessages);
       }
 
       const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
@@ -622,20 +659,36 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
   /** Lua-based atomic flush (TICKET-005). */
   private async execFlushLua(gameId: string, batch: PositionMessage[]): Promise<number> {
+    const n = batch.length;
+    const playerKeys: string[] = new Array(n);
+    const posXArgs: string[] = new Array(n);
+    const posYArgs: string[] = new Array(n);
+    const isAliveArgs: string[] = new Array(n);
+    const playerIdArgs: string[] = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const m = batch[i];
+      playerKeys[i] = REDIS_KEY.PLAYER(m.playerId);
+      posXArgs[i] = m.positionX.toString();
+      posYArgs[i] = m.positionY.toString();
+      isAliveArgs[i] = m.isAlive;
+      playerIdArgs[i] = m.playerId;
+    }
+
     const keys = [
       REDIS_KEY.ROOM_SEQ(gameId),
       REDIS_KEY.POSITION_CHANNEL(gameId),
       REDIS_KEY.ROOM_POSITION_LOG(gameId),
-      ...batch.map((m) => REDIS_KEY.PLAYER(m.playerId))
+      ...playerKeys
     ];
     const args = [
       this.serverId,
       gameId,
       POSITION_HISTORY_SIZE.toString(),
-      ...batch.map((m) => m.positionX.toString()),
-      ...batch.map((m) => m.positionY.toString()),
-      ...batch.map((m) => m.isAlive),
-      ...batch.map((m) => m.playerId)
+      ...posXArgs,
+      ...posYArgs,
+      ...isAliveArgs,
+      ...playerIdArgs
     ];
     const result = await (this.redis as any).evalsha(this.luaSha, keys.length, ...keys, ...args);
     return result as number;
@@ -754,36 +807,31 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     );
   }
 
-  private async broadcastToDeadPlayers(
+  /**
+   * 탈락한 플레이어들에게 dead 위치 업데이트를 브로드캐스트한다.
+   * Redis 조회 없이 인메모리 playerSocketMap / deadPlayerIds 만 사용한다.
+   */
+  private broadcastToDeadPlayers(
     gameId: string,
     seq: number,
     deadMessages: PositionMessage[]
-  ): Promise<void> {
-    const players = await this.redis.smembers(REDIS_KEY.ROOM_PLAYERS(gameId));
-    if (players.length === 0) return;
+  ): void {
+    const deadSet = this.deadPlayerIds.get(gameId);
+    if (!deadSet || deadSet.size === 0) return;
 
-    const pipeline = this.redis.pipeline();
-    players.forEach((id) => pipeline.hmget(REDIS_KEY.PLAYER(id), 'isAlive', 'socketId'));
-    type Result = [Error | null, [string, string] | null];
-    const results = (await pipeline.exec()) as Result[];
+    const playerMap = this.playerSocketMap.get(gameId);
+    if (!playerMap) return;
 
     const updates = deadMessages.map((m) => ({
       playerId: m.playerId,
       playerPosition: [m.positionX, m.positionY] as [number, number]
     }));
 
-    results
-      .map(([err, data], index) => ({
-        id: players[index],
-        isAlive: err ? null : data?.[0],
-        socketId: err ? null : data?.[1]
-      }))
-      .filter((p) => p.isAlive === SurvivalStatus.DEAD)
-      .forEach((p) => {
-        const socket = this.server.sockets.get(p.socketId);
-        if (socket) {
-          socket.emit(SocketEvents.UPDATE_POSITION, { seq, updates });
-        }
-      });
+    for (const playerId of deadSet) {
+      const socketId = playerMap.get(playerId);
+      if (!socketId) continue;
+      const socket = this.server.sockets.get(socketId);
+      socket?.emit(SocketEvents.UPDATE_POSITION, { seq, updates });
+    }
   }
 }
