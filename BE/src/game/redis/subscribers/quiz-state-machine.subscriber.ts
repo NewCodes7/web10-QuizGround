@@ -86,17 +86,28 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
     const leaderboardKey = REDIS_KEY.ROOM_LEADERBOARD(gameId);
 
     if (gameMode === GameMode.RANKING) {
-      const score = 1000 / correctPlayers.length;
-      correctPlayers.forEach((clientId) => {
-        this.redis.zincrby(leaderboardKey, score, clientId);
-      });
+      // 정답자가 없으면 점수 변동 없음 (0 나눗셈 방지)
+      if (correctPlayers.length > 0) {
+        const score = 1000 / correctPlayers.length;
+        const pipeline = this.redis.pipeline();
+        correctPlayers.forEach((clientId) => {
+          pipeline.zincrby(leaderboardKey, score, clientId);
+        });
+        await pipeline.exec();
+      }
     } else if (gameMode === GameMode.SURVIVAL) {
+      // publish 전에 리더보드·생존 상태 쓰기가 완료되어야 getQuizResults가 정확한 값을 읽는다
+      const pipeline = this.redis.pipeline();
       correctPlayers.forEach((clientId) => {
-        this.redis.zadd(leaderboardKey, 1, clientId);
+        pipeline.zadd(leaderboardKey, 1, clientId);
       });
       inCorrectPlayers.forEach((clientId) => {
-        this.redis.zadd(leaderboardKey, 0, clientId);
-        this.redis.hset(REDIS_KEY.PLAYER(clientId), { isAlive: '0' });
+        pipeline.zadd(leaderboardKey, 0, clientId);
+        pipeline.hset(REDIS_KEY.PLAYER(clientId), { isAlive: '0' });
+      });
+      await pipeline.exec();
+      // isAlive 쓰기가 완료된 뒤 onPlayerDied 호출
+      inCorrectPlayers.forEach((clientId) => {
         this.positionBroadcastService.onPlayerDied(gameId, clientId);
       });
     }
@@ -122,11 +133,11 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
 
     // 게임 끝을 알림
     if (this.hasNoMoreQuiz(quizList, newQuizNum) || this.checkSurvivalEnd(players.length, aliveCount)) {
-      // 모든 플레이어를 생존자로 변경
+      // 모든 플레이어를 생존자로 변경 (await 없으면 다음 게임 시작 시 dead 상태로 남을 수 있다)
       const players = await this.redis.smembers(REDIS_KEY.ROOM_PLAYERS(gameId));
-      players.forEach((id) => {
-        this.redis.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE });
-      });
+      await Promise.all(
+        players.map((id) => this.redis.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE }))
+      );
 
       const leaderboard = await this.redis.zrange(
         REDIS_KEY.ROOM_LEADERBOARD(gameId),

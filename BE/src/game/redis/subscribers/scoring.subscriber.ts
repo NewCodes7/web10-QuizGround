@@ -25,17 +25,14 @@ export class ScoringSubscriber extends RedisSubscriber {
   private async handleScoring(gameId: string, completeClientsCount: number, server: Namespace) {
     const scoringKey = REDIS_KEY.ROOM_SCORING_COUNT(gameId);
 
-    if (!this.redis.exists(scoringKey)) {
-      this.redis.set(scoringKey, 0);
-    }
-    this.redis.incrby(scoringKey, completeClientsCount);
-
+    // NX: 키가 없을 때만 0으로 초기화 (원자적), 이후 increment도 await로 직렬화
+    await this.redis.set(scoringKey, '0', 'NX');
+    const newCount = await this.redis.incrby(scoringKey, completeClientsCount);
     const playersCount = await this.redis.scard(REDIS_KEY.ROOM_PLAYERS(gameId));
-    const scoringCount = await this.redis.get(scoringKey);
 
-    if (parseInt(scoringCount) >= playersCount) {
+    if (newCount >= playersCount) {
       await this.completeScoring(gameId, server);
-      this.redis.set(scoringKey, 0);
+      await this.redis.set(scoringKey, '0');
     }
   }
 
