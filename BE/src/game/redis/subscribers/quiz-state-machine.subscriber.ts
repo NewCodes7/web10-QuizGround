@@ -153,10 +153,17 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
       REDIS_KEY.ROOM_QUIZ_CHOICES(gameId, quizList[newQuizNum])
     );
 
+    // 선택지를 섞어 정답 위치가 매 라운드 달라지도록 한다
+    const shuffledEntries = Object.entries(quizChoices).sort(() => Math.random() - 0.5);
+    const newAnswerPosition = shuffledEntries.findIndex(([key]) => key === quiz.answer) + 1;
+    await this.redis.hset(REDIS_KEY.ROOM_QUIZ(gameId, quizList[newQuizNum]), {
+      answer: newAnswerPosition.toString()
+    });
+
     server.to(gameId).emit(SocketEvents.START_QUIZ_TIME, {
       quiz: quiz.quiz,
-      choiceList: Object.entries(quizChoices).map(([key, value]) => ({
-        order: key,
+      choiceList: shuffledEntries.map(([, value], i) => ({
+        order: (i + 1).toString(),
         content: value
       })),
       startTime: Date.now() + 3000,
