@@ -131,5 +131,7 @@ class SocketService {
   }
 }
 
-const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000/game';
+const socketUrl =
+  import.meta.env.VITE_SOCKET_URL ||
+  (import.meta.env.DEV ? 'http://localhost:3000/game' : `${window.location.origin}/game`);
 export const socketService = new SocketService(socketUrl);
