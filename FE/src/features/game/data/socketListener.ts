@@ -105,16 +105,22 @@ const playerAppliedSeqMap = new Map<string, number>();
 // 방 단위 재전송 요청 in-flight 여부 (TICKET-008: 중복 요청 방지)
 const retransmitPending = new Set<string>();
 
-socketService.on('updatePosition', (data) => {
+socketService.on('updatePosition', (rawData) => {
   // 신규 포맷: { seq, updates: [{playerId, playerPosition}] }
   // 구 포맷 호환: [{playerId, playerPosition}] 또는 {playerId, playerPosition}
-  const isFramed = !Array.isArray(data) && data.updates !== undefined;
+  type AnyPositionData =
+    | { seq: number; updates: { playerId: string; playerPosition: [number, number] }[] }
+    | { playerId: string; playerPosition: [number, number] }
+    | { playerId: string; playerPosition: [number, number] }[];
+  const data = rawData as AnyPositionData;
+  const isFramed = !Array.isArray(data) && 'updates' in data;
+  type FramedData = { seq: number; updates: { playerId: string; playerPosition: [number, number] }[] };
   const updates: { playerId: string; playerPosition: [number, number] }[] = isFramed
-    ? data.updates
+    ? (data as FramedData).updates
     : Array.isArray(data)
       ? data
-      : [data];
-  const seq: number | undefined = isFramed ? data.seq : undefined;
+      : [data as { playerId: string; playerPosition: [number, number] }];
+  const seq: number | undefined = isFramed ? (data as FramedData).seq : undefined;
 
   if (seq !== undefined) {
     const gameId = useRoomStore.getState().gameId;
