@@ -139,7 +139,7 @@ jobs:
       - name: be.tar.gz 전송
         run: |
           ssh node1 "mkdir -p ~/quizground/tobe"
-          rsync -avz be.tar.gz node1:~/quizground/tobe/
+          scp be.tar.gz node1:~/quizground/tobe/
 
       - name: node-1 배포 실행
         run: |
@@ -192,7 +192,7 @@ jobs:
       - name: be.tar.gz 전송
         run: |
           ssh node2 "mkdir -p ~/quizground/tobe"
-          rsync -avz be.tar.gz node2:~/quizground/tobe/
+          scp be.tar.gz node2:~/quizground/tobe/
 
       - name: node-2 배포 실행
         run: |
@@ -237,7 +237,7 @@ jobs:
       - name: fe.tar.gz 전송
         run: |
           ssh nginx "mkdir -p ~/quizground/tobe"
-          rsync -avz fe.tar.gz nginx:~/quizground/tobe/
+          scp fe.tar.gz nginx:~/quizground/tobe/
 
       - name: nginx 배포 실행
         run: |
