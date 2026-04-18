@@ -43,8 +43,9 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
-    # BE - Socket.IO WebSocket + API 프록시
-    location /game {
+    # BE - Socket.IO 폴링/WebSocket 트랜스포트 프록시
+    # socket.IO는 네임스페이스(/game)와 무관하게 /socket.io/ 경로로 HTTP 요청을 보냄
+    location /socket.io/ {
         proxy_pass http://quizground_backend;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -52,9 +53,17 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        # WebSocket 연결 유지 (장시간 게임 세션 대응)
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
+    }
+
+    # BE - REST API 프록시
+    location /api/ {
+        proxy_pass http://quizground_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
 }
 NGINX_CONF
