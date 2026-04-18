@@ -112,25 +112,28 @@ jobs:
           name: build-artifacts
 
       - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.GCE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.GCE_HOST_NGINX }} >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config << 'EOF'
-          Host nginx-bastion
-            HostName ${{ secrets.GCE_HOST_NGINX }}
-            User ${{ secrets.GCE_USERNAME }}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-
-          Host node1
-            HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}
-            User ${{ secrets.GCE_USERNAME }}
-            IdentityFile ~/.ssh/id_rsa
-            ProxyJump nginx-bastion
-            StrictHostKeyChecking no
-          EOF
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node1"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: be.tar.gz 전송
@@ -162,25 +165,28 @@ jobs:
           name: build-artifacts
 
       - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.GCE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.GCE_HOST_NGINX }} >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config << 'EOF'
-          Host nginx-bastion
-            HostName ${{ secrets.GCE_HOST_NGINX }}
-            User ${{ secrets.GCE_USERNAME }}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-
-          Host node2
-            HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}
-            User ${{ secrets.GCE_USERNAME }}
-            IdentityFile ~/.ssh/id_rsa
-            ProxyJump nginx-bastion
-            StrictHostKeyChecking no
-          EOF
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node2"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: be.tar.gz 전송
@@ -212,27 +218,36 @@ jobs:
           name: build-artifacts
 
       - name: SSH 설정
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.GCE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.GCE_HOST_NGINX }} >> ~/.ssh/known_hosts
+          {
+            echo "Host nginx"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: fe.tar.gz 전송
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NGINX }} \
-            "mkdir -p ~/quizground/tobe"
-          rsync -avz fe.tar.gz \
-            ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NGINX }}:~/quizground/tobe/
+          ssh nginx "mkdir -p ~/quizground/tobe"
+          rsync -avz fe.tar.gz nginx:~/quizground/tobe/
 
       - name: nginx 배포 실행
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NGINX }} \
-            "set -e
+          ssh nginx "
+            set -e
             cd ~/quizground/tobe
             tar -xzf fe.tar.gz
             rm fe.tar.gz
             chmod +x scripts/nginx-deploy.sh
             NODE1_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE1 }} \
             NODE2_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE2 }} \
-            bash scripts/nginx-deploy.sh"
+            bash scripts/nginx-deploy.sh
+          "
