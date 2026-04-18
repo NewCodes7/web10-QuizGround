@@ -99,6 +99,7 @@ jobs:
           retention-days: 1
 
   # ── 2. node-1 배포 ──────────────────────────────────────────────
+  # node-1/2는 외부 IP 없음 → nginx VM을 jump host(bastion)로 경유
   deploy-node1:
     name: Deploy to node-1
     needs: build
@@ -110,23 +111,36 @@ jobs:
         with:
           name: build-artifacts
 
-      - name: SSH 설정
+      - name: SSH 설정 (nginx bastion 경유)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.GCE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.GCE_HOST_NODE1 }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.GCE_HOST_NGINX }} >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config << 'EOF'
+          Host nginx-bastion
+            HostName ${{ secrets.GCE_HOST_NGINX }}
+            User ${{ secrets.GCE_USERNAME }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+
+          Host node1
+            HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}
+            User ${{ secrets.GCE_USERNAME }}
+            IdentityFile ~/.ssh/id_rsa
+            ProxyJump nginx-bastion
+            StrictHostKeyChecking no
+          EOF
+          chmod 600 ~/.ssh/config
 
       - name: be.tar.gz 전송
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE1 }} \
-            "mkdir -p ~/quizground/tobe"
-          rsync -avz be.tar.gz \
-            ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE1 }}:~/quizground/tobe/
+          ssh node1 "mkdir -p ~/quizground/tobe"
+          rsync -avz be.tar.gz node1:~/quizground/tobe/
 
       - name: node-1 배포 실행
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE1 }} "
+          ssh node1 "
             set -e
             cd ~/quizground/tobe
             tar -xzf be.tar.gz
@@ -147,23 +161,36 @@ jobs:
         with:
           name: build-artifacts
 
-      - name: SSH 설정
+      - name: SSH 설정 (nginx bastion 경유)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.GCE_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.GCE_HOST_NODE2 }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.GCE_HOST_NGINX }} >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config << 'EOF'
+          Host nginx-bastion
+            HostName ${{ secrets.GCE_HOST_NGINX }}
+            User ${{ secrets.GCE_USERNAME }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+
+          Host node2
+            HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}
+            User ${{ secrets.GCE_USERNAME }}
+            IdentityFile ~/.ssh/id_rsa
+            ProxyJump nginx-bastion
+            StrictHostKeyChecking no
+          EOF
+          chmod 600 ~/.ssh/config
 
       - name: be.tar.gz 전송
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE2 }} \
-            "mkdir -p ~/quizground/tobe"
-          rsync -avz be.tar.gz \
-            ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE2 }}:~/quizground/tobe/
+          ssh node2 "mkdir -p ~/quizground/tobe"
+          rsync -avz be.tar.gz node2:~/quizground/tobe/
 
       - name: node-2 배포 실행
         run: |
-          ssh ${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_HOST_NODE2 }} "
+          ssh node2 "
             set -e
             cd ~/quizground/tobe
             tar -xzf be.tar.gz

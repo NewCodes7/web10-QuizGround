@@ -134,14 +134,14 @@ GitHub 저장소 → Settings → Secrets and variables → Actions에서 아래
 | Secret 이름 | 값 | 설명 |
 |-------------|-----|------|
 | `GCE_PRIVATE_KEY` | `cat ~/.ssh/quizground_deploy` 출력 내용 | SSH 개인키 (-----BEGIN OPENSSH PRIVATE KEY----- 포함) |
-| `GCE_USERNAME` | `rjwltakf090603` 또는 VM 유저명 | SSH 접속 유저 |
-| `GCE_HOST_NGINX` | `34.xxx.xxx.xxx` | nginx **외부** IP (bastion 역할) |
-| `GCE_INTERNAL_IP_NODE1` | `10.xxx.xxx.xxx` | node-1 **내부** IP (nginx를 통해 SSH 접속) |
-| `GCE_INTERNAL_IP_NODE2` | `10.xxx.xxx.xxx` | node-2 **내부** IP (nginx를 통해 SSH 접속) |
+| `GCE_USERNAME` | VM 유저명 (GCP 계정 이메일 @ 앞부분) | SSH 접속 유저 |
+| `GCE_HOST_NGINX` | `34.xxx.xxx.xxx` | nginx VM **외부** IP (bastion 역할) |
+| `GCE_INTERNAL_IP_NODE1` | `10.xxx.xxx.xxx` | node-1 **내부** IP |
+| `GCE_INTERNAL_IP_NODE2` | `10.xxx.xxx.xxx` | node-2 **내부** IP |
 | `ENV` | `.env` 파일 내용 전체 | 프로덕션 환경변수 |
 
-> **node VM 접속 방식**: node-1/2는 외부 IP가 없으므로 nginx VM을 jump host(bastion)로 경유합니다.  
-> GitHub Actions에서 `proxy_host: GCE_HOST_NGINX`로 설정하면 nginx → node 내부망 SSH가 자동으로 처리됩니다.
+> **node VM 접속 방식**: node-1/2는 외부 IP가 없으므로 `GCE_HOST_NGINX`를 ProxyJump(bastion)로 경유합니다.  
+> CI/CD 워크플로우가 자동으로 nginx → node 내부망 SSH 터널을 설정합니다.
 
 ### 6. 프로덕션 .env 작성
 
