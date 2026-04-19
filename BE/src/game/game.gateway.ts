@@ -30,22 +30,28 @@ import { PositionBroadcastService } from './service/position-broadcast.service';
 import { RetransmitPositionDto } from './dto/retransmit-position.dto';
 import { RetransmitChatDto } from './dto/retransmit-chat.dto';
 
+const CORS_ORIGINS: (string | RegExp)[] = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'https://news.taskify.shop',
+  'https://quizground.duckdns.org',
+  'https://admin.socket.io',
+  'https://quizground.site',
+  /\.app\.github\.dev$/
+];
+
+if (process.env.CORS_ORIGIN) {
+  CORS_ORIGINS.push(...process.env.CORS_ORIGIN.split(',').map((o) => o.trim()));
+}
+
 @UseInterceptors(MetricInterceptor)
 @UseInterceptors(GameActivityInterceptor)
 @UseFilters(new WsExceptionFilter())
 @WebSocketGateway({
   cors: {
-    origin: [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'http://localhost:4173',
-      'http://127.0.0.1:4173',
-      'https://news.taskify.shop',
-      'https://quizground.duckdns.org',
-      'https://admin.socket.io',
-      'https://quizground.site',
-      /\.app\.github\.dev$/
-    ],
+    origin: CORS_ORIGINS,
     credentials: true
   },
   namespace: '/game'
