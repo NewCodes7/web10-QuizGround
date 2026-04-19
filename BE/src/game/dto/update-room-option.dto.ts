@@ -20,7 +20,7 @@ export class UpdateRoomOptionDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(10000)
   maxPlayerCount: number;
 
   @Transform(({ value }) => {
