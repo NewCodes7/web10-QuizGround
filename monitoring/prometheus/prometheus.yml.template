@@ -35,11 +35,11 @@ scrape_configs:
 
   - job_name: 'redis'
     static_configs:
-      - targets: ['localhost:9121']
+      - targets: ['redis_exporter:9121']
 
   - job_name: 'nginx'
     static_configs:
-      - targets: ['localhost:9113']
+      - targets: ['nginx_exporter:9113']
 
   - job_name: 'prometheus'
     static_configs:

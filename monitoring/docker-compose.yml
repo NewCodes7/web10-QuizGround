@@ -53,8 +53,9 @@ services:
     container_name: quizground-nginx-exporter
     restart: unless-stopped
     command:
-      - '-nginx.scrape-uri=http://127.0.0.1:8080/stub_status'
-    network_mode: "host"
+      - '-nginx.scrape-uri=http://${NGINX_INTERNAL_IP}:8080/stub_status'
+    networks:
+      - monitoring
 
 volumes:
   prometheus_data:
