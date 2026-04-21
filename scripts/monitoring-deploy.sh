@@ -56,8 +56,8 @@ sudo docker compose pull --quiet
 sudo docker compose up -d --remove-orphans
 
 # ── 6. 헬스체크 ──────────────────────────────────────────────────────
-echo "[DEPLOY] 헬스체크 대기 (30s)..."
-sleep 30
+echo "[DEPLOY] 헬스체크 대기 (60s)..."
+sleep 60
 
 HEALTH_OK=true
 
@@ -68,7 +68,8 @@ else
   HEALTH_OK=false
 fi
 
-if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+# sub-path 모드이므로 /grafana/api/health 사용
+if curl -sf http://localhost:3001/grafana/api/health > /dev/null 2>&1; then
   echo "  Grafana: OK"
 else
   echo "  Grafana: FAILED"
