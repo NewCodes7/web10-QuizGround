@@ -26,6 +26,7 @@ import { SetPlayerNameDto } from './dto/set-player-name.dto';
 import { KickRoomDto } from './dto/kick-room.dto';
 import { ExceptionMessage } from '../common/constants/exception-message';
 import { MetricInterceptor } from '../metric/metric.interceptor';
+import { MetricService } from '../metric/metric.service';
 import { PositionBroadcastService } from './service/position-broadcast.service';
 import { RetransmitPositionDto } from './dto/retransmit-position.dto';
 import { RetransmitChatDto } from './dto/retransmit-chat.dto';
@@ -65,7 +66,8 @@ export class GameGateway {
     private readonly gameSessionService: GameSessionService,
     private readonly gameChatService: GameChatService,
     private readonly gameRoomService: GameRoomService,
-    private readonly positionBroadcastService: PositionBroadcastService
+    private readonly positionBroadcastService: PositionBroadcastService,
+    private readonly metricService: MetricService
   ) {}
 
   @SubscribeMessage(SocketEvents.UPDATE_POSITION)
@@ -198,26 +200,21 @@ export class GameGateway {
       await this.gameSessionService.connection(client);
       this.logger.verbose(`클라이언트가 연결되었어요!: ${client.data.playerId}`);
     } catch (error) {
-      // 1. 에러 로깅
       this.logger.error(`Connection error: ${error.message + ExceptionMessage.CONNECTION_ERROR}`);
-
-      // 2. 클라이언트에게 에러 전송
       client.emit('exception', {
         event: 'connection',
         message: error.message + ExceptionMessage.CONNECTION_ERROR
       });
-
-      // 3. 연결 종료
       client.disconnect(true);
-
-      // 4. 에러를 던지지 않고 처리 완료
       return;
     }
+    // server.sockets.sockets.size는 동기 O(1) — 응답 경로 블로킹 없음
+    this.metricService.setWsClients(this.server.sockets.size);
   }
 
   async handleDisconnect(client: Socket) {
     this.logger.verbose(`클라이언트가 연결 해제되었어요!: ${client.data.playerId}`);
-
     await this.gameRoomService.handlePlayerExit(client.data.playerId);
+    this.metricService.setWsClients(this.server.sockets.size);
   }
 }

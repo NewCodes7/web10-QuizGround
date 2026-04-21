@@ -14,6 +14,7 @@ import { TraceClass } from '../../common/interceptor/SocketEventLoggerIntercepto
 import { SurvivalStatus } from '../../common/constants/game';
 import { PositionBroadcastService } from './position-broadcast.service';
 import { GameChatService } from './game-chat.service';
+import { MetricService } from '../../metric/metric.service';
 
 @TraceClass()
 @Injectable()
@@ -25,7 +26,8 @@ export class GameRoomService {
     @InjectRedis() private readonly redis: Redis,
     private readonly gameValidator: GameValidator,
     private readonly positionBroadcastService: PositionBroadcastService,
-    private readonly gameChatService: GameChatService
+    private readonly gameChatService: GameChatService,
+    private readonly metricService: MetricService
   ) {}
 
   async createRoom(gameConfig: CreateGameDto, clientId: string): Promise<string> {
@@ -125,6 +127,11 @@ export class GameRoomService {
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
+
+      // fire-and-forget — 메트릭 실패가 게임 로직에 영향 주지 않도록
+      this.redis.scard(REDIS_KEY.ROOM_PLAYERS(gameId))
+        .then(count => this.metricService.setRoomPlayerCount(gameId, count))
+        .catch(() => {});
 
       const isHost = (await this.redis.hget(REDIS_KEY.ROOM(gameId), 'host')) === clientId;
       await this.redis.publish(
@@ -278,9 +285,7 @@ export class GameRoomService {
     }
 
     const remainingPlayers = await this.redis.scard(roomPlayersKey);
-
-    // 4. 플레이어 관련 모든 키에 TTL 설정
-    // await this.setTTLForPlayerKeys(clientId);
+    this.metricService.setRoomPlayerCount(roomId, remainingPlayers);
 
     if (remainingPlayers === 0) {
       // 마지막 플레이어가 나간 경우

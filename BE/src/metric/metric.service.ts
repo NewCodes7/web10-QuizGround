@@ -22,8 +22,11 @@ export class MetricService {
     memory: promClient.Gauge;
     network: promClient.Gauge;
   };
+  private readonly wsConnectedClients: promClient.Gauge;
+  private readonly roomPlayerCount: promClient.Gauge;
 
   constructor(@InjectRedis() private readonly redis: Redis) {
+    promClient.collectDefaultMetrics();
     this.requestCounter = new promClient.Counter({
       name: 'socket_requests_total',
       help: 'Total number of socket requests',
@@ -64,7 +67,26 @@ export class MetricService {
       })
     };
 
+    this.wsConnectedClients = new promClient.Gauge({
+      name: 'websocket_connected_clients',
+      help: 'Currently connected WebSocket clients'
+    });
+
+    this.roomPlayerCount = new promClient.Gauge({
+      name: 'game_room_player_count',
+      help: 'Active players per game room',
+      labelNames: ['gameId']
+    });
+
     this.startCollectingSystemMetrics();
+  }
+
+  setWsClients(count: number) {
+    this.wsConnectedClients.set(count);
+  }
+
+  setRoomPlayerCount(gameId: string, count: number) {
+    this.roomPlayerCount.set({ gameId }, count);
   }
 
   private async startCollectingSystemMetrics() {
