@@ -33,9 +33,10 @@ upstream quizground_backend {
     server ${NODE2_INTERNAL_IP}:3000;
 }
 
-# nginx_exporter용 stub_status (localhost에서만 접근 가능)
+# nginx_exporter용 stub_status (localhost + Docker bridge에서만 접근 가능)
 server {
     listen 127.0.0.1:8080;
+    listen 172.17.0.1:8080;
     server_name _;
     location /stub_status {
         stub_status;
