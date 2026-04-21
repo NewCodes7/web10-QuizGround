@@ -52,8 +52,10 @@ services:
     image: nginx/nginx-prometheus-exporter:1.1.0
     container_name: quizground-nginx-exporter
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
-      - '-nginx.scrape-uri=http://${NGINX_INTERNAL_IP}:8080/stub_status'
+      - '-nginx.scrape-uri=http://host.docker.internal:8080/stub_status'
     networks:
       - monitoring
 
