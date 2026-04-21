@@ -33,10 +33,38 @@ upstream quizground_backend {
     server ${NODE2_INTERNAL_IP}:3000;
 }
 
+# nginx_exporter용 stub_status (localhost에서만 접근 가능)
+server {
+    listen 127.0.0.1:8080;
+    server_name _;
+    location /stub_status {
+        stub_status;
+    }
+}
+
 server {
     listen 80;
     root /var/www/html;
     index index.html;
+
+    # Grafana 모니터링 대시보드 프록시 (Docker 컨테이너 localhost:3001)
+    location /grafana/ {
+        proxy_pass http://127.0.0.1:3001/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Grafana WebSocket (실시간 대시보드 업데이트)
+    location /grafana/api/live/ {
+        proxy_pass http://127.0.0.1:3001/api/live/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
 
     # FE - React SPA 라우팅
     location / {
