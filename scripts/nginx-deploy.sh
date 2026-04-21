@@ -48,22 +48,16 @@ server {
     index index.html;
 
     # Grafana 모니터링 대시보드 프록시 (Docker 컨테이너 localhost:3001)
+    # serve_from_sub_path=true 이므로 trailing slash 없이 /grafana/ 경로 유지
     location /grafana/ {
-        proxy_pass http://127.0.0.1:3001/;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$http_upgrade;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Grafana WebSocket (실시간 대시보드 업데이트)
-    location /grafana/api/live/ {
-        proxy_pass http://127.0.0.1:3001/api/live/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
     }
 
     # FE - React SPA 라우팅
