@@ -32,7 +32,7 @@ fi
 # ── 2. nginx 설정 생성 (항상 갱신 - 내부 IP 변경 반영) ───────────
 # IP가 바뀔 수 있으므로 매 배포마다 설정 파일을 재생성
 echo "[DEPLOY] nginx upstream 설정 업데이트 중..."
-sudo tee /etc/nginx/sites-available/quizground > /dev/null << NGINX_CONF
+sudo tee /etc/nginx/conf.d/quizground.conf > /dev/null << NGINX_CONF
 upstream quizground_backend {
     # Socket.IO sticky session: cookie로 같은 클라이언트를 같은 WAS로 고정
     sticky cookie quizground_srv expires=1h path=/ httponly samesite=lax;
@@ -98,12 +98,8 @@ server {
 }
 NGINX_CONF
 
-# sites-enabled 심볼릭 링크 등록 (최초 1회)
-if [ ! -L /etc/nginx/sites-enabled/quizground ]; then
-  echo "[SETUP] nginx sites-enabled 설정 중..."
-  sudo ln -sf /etc/nginx/sites-available/quizground /etc/nginx/sites-enabled/quizground
-  sudo rm -f /etc/nginx/sites-enabled/default
-fi
+# nginx.org mainline 패키지는 conf.d/default.conf를 기본 제공 → 충돌 방지
+sudo rm -f /etc/nginx/conf.d/default.conf
 
 # ── 3. FE 정적 파일 배포 ──────────────────────────────────────────
 echo "[DEPLOY] FE 정적 파일 배포 중..."
