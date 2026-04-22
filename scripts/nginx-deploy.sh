@@ -17,7 +17,14 @@ echo "  upstream: $NODE1_INTERNAL_IP:3000, $NODE2_INTERNAL_IP:3000"
 
 # ── 1. nginx 설치 확인 (최초 배포 시) ────────────────────────────
 if ! command -v nginx &>/dev/null; then
-  echo "[SETUP] nginx 설치 중..."
+  echo "[SETUP] nginx 설치 중 (mainline 1.29.6+)..."
+  sudo apt-get update
+  sudo apt-get install -y curl gnupg2 lsb-release
+  curl -fsSL https://nginx.org/keys/nginx_signing.key \
+    | sudo gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+http://nginx.org/packages/mainline/ubuntu $(lsb_release -cs) nginx" \
+    | sudo tee /etc/apt/sources.list.d/nginx.list
   sudo apt-get update
   sudo apt-get install -y nginx
 fi
@@ -27,8 +34,8 @@ fi
 echo "[DEPLOY] nginx upstream 설정 업데이트 중..."
 sudo tee /etc/nginx/sites-available/quizground > /dev/null << NGINX_CONF
 upstream quizground_backend {
-    # Socket.IO sticky session: 같은 클라이언트는 같은 WAS로 라우팅
-    ip_hash;
+    # Socket.IO sticky session: cookie로 같은 클라이언트를 같은 WAS로 고정
+    sticky cookie quizground_srv expires=1h path=/ httponly samesite=lax;
     server ${NODE1_INTERNAL_IP}:3000;
     server ${NODE2_INTERNAL_IP}:3000;
 }
