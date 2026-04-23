@@ -55,6 +55,11 @@ cd "$DEPLOY_DIR"
 sudo docker compose pull --quiet
 sudo docker compose up -d --remove-orphans
 
+# Grafana는 provisioning 파일을 시작 시에만 읽으므로
+# 새 datasource(loki 등) 추가 후 반드시 재시작 필요
+echo "[DEPLOY] Grafana 재시작 (프로비저닝 파일 갱신)..."
+sudo docker compose restart grafana
+
 # ── 6. 헬스체크 ──────────────────────────────────────────────────────
 echo "[DEPLOY] 헬스체크 대기 (60s)..."
 sleep 60
