@@ -1,4 +1,17 @@
 services:
+  loki:
+    image: grafana/loki:2.9.10
+    container_name: quizground-loki
+    restart: unless-stopped
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    networks:
+      - monitoring
+
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: quizground-prometheus
@@ -34,6 +47,7 @@ services:
       - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
+      - loki
     networks:
       - monitoring
 
@@ -62,6 +76,7 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  loki_data:
 
 networks:
   monitoring:
