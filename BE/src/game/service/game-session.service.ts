@@ -32,21 +32,18 @@ export class GameSessionService {
 
   async updatePosition(updatePosition: UpdatePositionDto, clientId: string): Promise<void> {
     const { gameId, newPosition } = updatePosition;
-    const playerKey = REDIS_KEY.PLAYER(clientId);
 
-    // 1. gameId + isAlive 한 번에 조회하여 검증
-    const [playerGameId, isAlive] = await this.redis.hmget(playerKey, 'gameId', 'isAlive');
+    // gameId·isAlive를 인메모리에서 조회해 Redis 왕복을 제거 (핫패스 최적화)
+    const playerState = this.positionBroadcastService.getPlayerState(clientId);
     this.gameValidator.validatePlayerInRoomV2(
       SocketEvents.UPDATE_POSITION,
       gameId,
-      playerGameId?.toString()
+      playerState?.gameId
     );
 
-    // 2. 서버 로컬 배치 큐에 적재 (TICKET-003)
-    // Redis 즉시 write/publish 대신 50ms 단위 배치 flush 시 원자적으로 처리된다.
     this.logger.debug(
       `[updatePosition] recv — playerId=${clientId} gameId=${gameId} ` +
-        `x=${newPosition[0]} y=${newPosition[1]} isAlive=${isAlive ?? '1'}`
+        `x=${newPosition[0]} y=${newPosition[1]} isAlive=${playerState?.isAlive ?? '1'}`
     );
 
     this.positionBroadcastService.enqueueUpdate(gameId, {
@@ -54,7 +51,7 @@ export class GameSessionService {
       positionX: newPosition[0],
       positionY: newPosition[1],
       gameId,
-      isAlive: isAlive ?? '1'
+      isAlive: playerState?.isAlive ?? '1'
     });
   }
 

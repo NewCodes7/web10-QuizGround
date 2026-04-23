@@ -124,6 +124,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /** gameId → Set<playerId>. 탈락한 플레이어 집합 (서바이벌 모드). */
   private deadPlayerIds = new Map<string, Set<string>>();
 
+  /** playerId → gameId. updatePosition 핫패스에서 Redis 조회 없이 검증하기 위한 역매핑. */
+  private playerGameMap = new Map<string, string>();
+
   /** gameId → 타이머 슬롯 인덱스. cleanupRoom 에서 O(1) 삭제용. */
   private roomSlotMap = new Map<string, number>();
 
@@ -292,6 +295,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       this.playerSocketMap.set(gameId, playerMap);
     }
     playerMap.set(playerId, socketId);
+    this.playerGameMap.set(playerId, gameId);
   }
 
   /**
@@ -301,6 +305,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   onPlayerLeft(gameId: string, playerId: string): void {
     this.playerSocketMap.get(gameId)?.delete(playerId);
     this.deadPlayerIds.get(gameId)?.delete(playerId);
+    this.playerGameMap.delete(playerId);
   }
 
   /**
@@ -341,6 +346,17 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const queue = this.inputQueue.get(gameId);
     if (!queue) return; // room not active on this server
     queue.set(message.playerId, message);
+  }
+
+  /**
+   * updatePosition 핫패스용 인메모리 조회.
+   * Redis hmget 대신 이 메서드를 사용해 네트워크 왕복을 제거한다.
+   */
+  getPlayerState(playerId: string): { gameId: string; isAlive: string } | null {
+    const gameId = this.playerGameMap.get(playerId);
+    if (!gameId) return null;
+    const isAlive = this.deadPlayerIds.get(gameId)?.has(playerId) ? '0' : '1';
+    return { gameId, isAlive };
   }
 
   // ── Retransmit (TICKET-001, 002, 006) ─────────────────────────────────────
