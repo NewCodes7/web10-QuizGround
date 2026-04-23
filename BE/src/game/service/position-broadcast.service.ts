@@ -127,6 +127,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /** playerId → gameId. updatePosition 핫패스에서 Redis 조회 없이 검증하기 위한 역매핑. */
   private playerGameMap = new Map<string, string>();
 
+  /** playerId → playerName. chatMessage에서 Redis 조회 없이 이름 조회하기 위한 캐시. */
+  private playerNameMap = new Map<string, string>();
+
   /** gameId → 타이머 슬롯 인덱스. cleanupRoom 에서 O(1) 삭제용. */
   private roomSlotMap = new Map<string, number>();
 
@@ -288,7 +291,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    * 플레이어가 이 WAS에 접속했을 때 호출. 재접속 시 socketId를 덮어쓴다.
    * GameRoomService.joinRoom 에서 socketId 가 Redis에 기록된 직후 호출한다.
    */
-  onPlayerJoined(gameId: string, playerId: string, socketId: string): void {
+  onPlayerJoined(gameId: string, playerId: string, socketId: string, playerName?: string): void {
     let playerMap = this.playerSocketMap.get(gameId);
     if (!playerMap) {
       playerMap = new Map();
@@ -296,6 +299,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     }
     playerMap.set(playerId, socketId);
     this.playerGameMap.set(playerId, gameId);
+    if (playerName !== undefined) {
+      this.playerNameMap.set(playerId, playerName);
+    }
   }
 
   /**
@@ -306,6 +312,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     this.playerSocketMap.get(gameId)?.delete(playerId);
     this.deadPlayerIds.get(gameId)?.delete(playerId);
     this.playerGameMap.delete(playerId);
+    this.playerNameMap.delete(playerId);
   }
 
   /**
@@ -346,6 +353,23 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const queue = this.inputQueue.get(gameId);
     if (!queue) return; // room not active on this server
     queue.set(message.playerId, message);
+  }
+
+  /** chatMessage 핫패스용. 캐시 미스 시 undefined 반환 → 호출자가 Redis lazy fetch. */
+  getPlayerName(playerId: string): string | undefined {
+    return this.playerNameMap.get(playerId);
+  }
+
+  /** setPlayerName 이벤트 수신 시 캐시 갱신. */
+  updatePlayerName(playerId: string, name: string): void {
+    if (this.playerNameMap.has(playerId)) {
+      this.playerNameMap.set(playerId, name);
+    }
+  }
+
+  /** 퀴즈 전환 시 생존자 수 판별용. Redis 조회 없이 인메모리에서 반환한다. */
+  getDeadPlayerCount(gameId: string): number {
+    return this.deadPlayerIds.get(gameId)?.size ?? 0;
   }
 
   /**

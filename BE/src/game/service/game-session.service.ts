@@ -141,6 +141,7 @@ export class GameSessionService {
     const gameId = await this.redis.hget(REDIS_KEY.PLAYER(clientId), 'gameId');
 
     await this.redis.hmset(REDIS_KEY.PLAYER(clientId), { playerName });
+    this.positionBroadcastService.updatePlayerName(clientId, playerName);
     await this.redis.publish(
       `playerState:${gameId}`,
       JSON.stringify({ type: 'Name', playerId: clientId, playerName, gameId })

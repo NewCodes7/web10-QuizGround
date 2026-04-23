@@ -57,29 +57,26 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
     const correctPlayers = [];
     const inCorrectPlayers = [];
 
-    // 플레이어 답안 처리
-    for (const clientId of clients) {
-      const player = await this.redis.hgetall(REDIS_KEY.PLAYER(clientId));
+    // 플레이어 답안 처리: 200 순차 hgetall → pipeline 1회로 단축
+    const readPipeline = this.redis.pipeline();
+    clients.forEach((clientId) => readPipeline.hmget(REDIS_KEY.PLAYER(clientId), 'positionX', 'positionY', 'isAlive'));
+    const playerResults = await readPipeline.exec();
 
-      if (player.isAlive === '0') {
-        continue;
-      }
+    const writePipeline = this.redis.pipeline();
+    clients.forEach((clientId, i) => {
+      const [, fields] = playerResults[i] as [Error | null, [string, string, string] | null];
+      if (!fields || fields[2] === '0') return;
 
-      const selectAnswer = this.calculateAnswer(
-        player.positionX,
-        player.positionY,
-        parseInt(quiz.choiceCount)
-      );
-      // this.logger.verbose(selectAnswer);
-
+      const selectAnswer = this.calculateAnswer(fields[0], fields[1], parseInt(quiz.choiceCount));
       if (selectAnswer.toString() === quiz.answer) {
         correctPlayers.push(clientId);
-        await this.redis.hset(REDIS_KEY.PLAYER(clientId), { isAnswerCorrect: '1' });
+        writePipeline.hset(REDIS_KEY.PLAYER(clientId), { isAnswerCorrect: '1' });
       } else {
         inCorrectPlayers.push(clientId);
-        await this.redis.hset(REDIS_KEY.PLAYER(clientId), { isAnswerCorrect: '0' });
+        writePipeline.hset(REDIS_KEY.PLAYER(clientId), { isAnswerCorrect: '0' });
       }
-    }
+    });
+    await writePipeline.exec();
 
     // 점수 업데이트
     const gameMode = await this.redis.hget(REDIS_KEY.ROOM(gameId), 'gameMode');
@@ -125,19 +122,17 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
     const newQuizNum = currentQuizNum + 1;
     const quizList = await this.redis.smembers(REDIS_KEY.ROOM_QUIZ_SET(gameId));
 
-    // 생존 모드에서 모두 탈락하진 않았는지 체크
+    // 생존 모드에서 모두 탈락하진 않았는지 체크: Redis hget × 200 → 인메모리 조회
     const players = await this.redis.smembers(REDIS_KEY.ROOM_PLAYERS(gameId));
-    const aliveCount = (
-      await Promise.all(players.map((id) => this.redis.hget(REDIS_KEY.PLAYER(id), 'isAlive')))
-    ).filter((isAlive) => isAlive === SurvivalStatus.ALIVE).length;
+    const deadCount = this.positionBroadcastService.getDeadPlayerCount(gameId);
+    const aliveCount = players.length - deadCount;
 
     // 게임 끝을 알림
     if (this.hasNoMoreQuiz(quizList, newQuizNum) || this.checkSurvivalEnd(players.length, aliveCount)) {
-      // 모든 플레이어를 생존자로 변경 (await 없으면 다음 게임 시작 시 dead 상태로 남을 수 있다)
-      const players = await this.redis.smembers(REDIS_KEY.ROOM_PLAYERS(gameId));
-      await Promise.all(
-        players.map((id) => this.redis.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE }))
-      );
+      // 모든 플레이어를 생존자로 변경: Promise.all × 200 → pipeline 1회
+      const resetPipeline = this.redis.pipeline();
+      players.forEach((id) => resetPipeline.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE }));
+      await resetPipeline.exec();
 
       const leaderboard = await this.redis.zrange(
         REDIS_KEY.ROOM_LEADERBOARD(gameId),

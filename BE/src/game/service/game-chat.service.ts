@@ -5,6 +5,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GameValidator } from '../middleware/game.validator';
+import { PositionBroadcastService } from './position-broadcast.service';
 import { ChatMessageModel } from '../entities/chat-message.entity';
 import { ChatMessageDto } from '../dto/chat-message.dto';
 import { REDIS_KEY } from '../../common/constants/redis-key.constant';
@@ -117,6 +118,7 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
   constructor(
     @InjectRedis() private readonly redis: Redis,
     private readonly gameValidator: GameValidator,
+    private readonly positionBroadcastService: PositionBroadcastService,
     @InjectRepository(ChatMessageModel)
     private readonly chatMessageRepository: Repository<ChatMessageModel>
   ) {
@@ -227,37 +229,40 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
   async chatMessage(chatMessage: ChatMessageDto, clientId: string): Promise<void> {
     const { gameId, message } = chatMessage;
 
-    // Room(title만) + Player(gameId·playerName·isAlive) 를 병렬로 조회한다.
-    // HGETALL 대비 필요한 필드만 가져오고 RTT도 1회로 단축된다.
-    const [[roomTitle], [playerGameId, playerName, isAlive]] = await Promise.all([
-      this.redis.hmget(REDIS_KEY.ROOM(gameId), 'title'),
-      this.redis.hmget(REDIS_KEY.PLAYER(clientId), 'gameId', 'playerName', 'isAlive')
-    ]);
-
-    if (!roomTitle) {
-      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.ROOM_NOT_FOUND);
-    }
-    if (playerGameId !== gameId) {
-      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.NOT_A_PLAYER);
-    }
-
+    // inputQueue 존재 여부로 방 활성 확인 (Redis ROOM hmget 제거)
     const queue = this.inputQueue.get(gameId);
     if (!queue) {
       this.logger.warn(`[chatMessage] room ${gameId} not active on this WAS — rejected`);
       throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.UNAUTHORIZED_ROOM_ACCESS);
     }
 
+    // playerGameId·isAlive를 인메모리에서 조회 (Redis PLAYER hmget 제거)
+    const playerState = this.positionBroadcastService.getPlayerState(clientId);
+    if (!playerState) {
+      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.NOT_A_PLAYER);
+    }
+    if (playerState.gameId !== gameId) {
+      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.NOT_A_PLAYER);
+    }
+
+    // playerName 캐시 조회. 미스 시 Redis에서 lazy fetch 후 캐싱.
+    let playerName = this.positionBroadcastService.getPlayerName(clientId);
+    if (playerName === undefined) {
+      playerName = (await this.redis.hget(REDIS_KEY.PLAYER(clientId), 'playerName')) ?? '';
+      this.positionBroadcastService.updatePlayerName(clientId, playerName);
+    }
+
     queue.push({
       playerId: clientId,
-      playerName: playerName ?? '',
+      playerName,
       message,
       timestamp: Date.now(),
-      isAlive: isAlive ?? SurvivalStatus.ALIVE
+      isAlive: playerState.isAlive
     });
 
     this.logger.verbose(
       `[chatMessage] Room: ${gameId} | playerId: ${clientId} | playerName: ${playerName}` +
-        ` | isAlive: ${isAlive === SurvivalStatus.ALIVE ? '생존자' : '관전자'} | Message: ${message}`
+        ` | isAlive: ${playerState.isAlive === SurvivalStatus.ALIVE ? '생존자' : '관전자'} | Message: ${message}`
     );
   }
 

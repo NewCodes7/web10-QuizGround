@@ -86,7 +86,7 @@ export class GameRoomService {
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
+      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, playerData.playerName ?? '');
 
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
       return;
@@ -123,7 +123,7 @@ export class GameRoomService {
         isAlive: SurvivalStatus.ALIVE,
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
+      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, '');
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
