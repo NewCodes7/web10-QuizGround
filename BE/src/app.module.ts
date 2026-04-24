@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { ClassSerializerInterceptor, Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -41,6 +42,9 @@ import { MetricModule } from './metric/metric.module';
       database: process.env.DB_NAME || 'test_db',
       entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel, ChatMessageModel],
       synchronize: process.env.DEV ? true : false, // 개발 모드에서만 활성화
+      migrations: [join(__dirname, 'database', 'migrations', '*.js')],
+      migrationsRun: !process.env.DEV,
+      migrationsTableName: 'typeorm_migrations',
       logging: true, // 모든 쿼리 로깅
       logger: 'advanced-console'
       // extra: {
