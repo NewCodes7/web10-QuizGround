@@ -65,6 +65,29 @@ npm run lint               # eslint
 
 ---
 
+## Infrastructure (Google Cloud)
+
+```
+Internet
+  │
+  ▼
+nginx VM (e2-micro, 1 vCPU / 1 GB RAM)  ← FE static + BE reverse proxy, external IP
+  │  cookie sticky session (upstream)
+  ├──▶ node-1 VM (e2-small, 1 vCPU / 1 GB RAM)  ← NestJS WAS, internal IP only
+  └──▶ node-2 VM (e2-small, 1 vCPU / 1 GB RAM)  ← NestJS WAS, internal IP only
+            │
+     quizground VPC (10.10.0.0/16)
+            ├──▶ redis VM  (e2-micro, 1 vCPU / 1 GB RAM)  :6379
+            └──▶ mysql VM  (e2-small, 1 vCPU / 1 GB RAM)  :3306
+```
+
+- All VMs in the `quizground` VPC; only nginx has an external IP (acts as CI/CD bastion)
+- Cloud NAT for outbound internet on internal VMs
+- Rolling deploy: node-1 → node-2 via PM2 reload (zero-downtime)
+- Sticky session via cookie hash so each player lands on the same WAS; Redis pub/sub handles cross-WAS state sync
+
+---
+
 ## Architecture
 
 ### Distributed WAS
