@@ -82,11 +82,11 @@ export class GameRoomService {
       client.join(gameId);
       this.positionBroadcastService.onRoomJoined(gameId);
       this.gameChatService.onRoomJoined(gameId);
+      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, playerData.playerName ?? '');
 
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, playerData.playerName ?? '');
 
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
       return;
@@ -108,6 +108,7 @@ export class GameRoomService {
     client.join(gameId); //validation 후에 조인해야함
     this.positionBroadcastService.onRoomJoined(gameId);
     this.gameChatService.onRoomJoined(gameId);
+    this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, '');
 
     // onRoomJoined 이후 예외가 발생하면 onRoomLeft를 호출해 카운트 불균형을 방지한다.
     try {
@@ -123,7 +124,6 @@ export class GameRoomService {
         isAlive: SurvivalStatus.ALIVE,
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, '');
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
@@ -143,6 +143,7 @@ export class GameRoomService {
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
     } catch (err) {
       this.positionBroadcastService.onRoomLeft(gameId);
+      this.positionBroadcastService.onPlayerLeft(gameId, clientId);
       this.gameChatService.onRoomLeft(gameId);
       throw err;
     }
