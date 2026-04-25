@@ -85,7 +85,7 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "memory:alloc_objects:count:alloc_objects:count",
+          "profileTypeId": "memory:alloc_objects:count:space:bytes",
           "refId": "A"
         }
       ],
@@ -102,7 +102,7 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
+          "profileTypeId": "memory:inuse_space:bytes:space:bytes",
           "refId": "A"
         }
       ],
