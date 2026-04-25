@@ -1,0 +1,41 @@
+storage:
+  backend: filesystem
+  filesystem:
+    path: /data
+
+scrape_configs:
+  - job_name: quizground-node1
+    static_configs:
+      - targets:
+          - ${NODE1_INTERNAL_IP}:9999
+        labels:
+          service_name: quizground.was
+          instance: node1
+    profiling_config:
+      pprof_config:
+        process_cpu:
+          enabled: true
+          path: /debug/pprof/profile
+          delta: true
+        memory:
+          enabled: true
+          path: /debug/pprof/heap
+          delta: false
+
+  - job_name: quizground-node2
+    static_configs:
+      - targets:
+          - ${NODE2_INTERNAL_IP}:9999
+        labels:
+          service_name: quizground.was
+          instance: node2
+    profiling_config:
+      pprof_config:
+        process_cpu:
+          enabled: true
+          path: /debug/pprof/profile
+          delta: true
+        memory:
+          enabled: true
+          path: /debug/pprof/heap
+          delta: false

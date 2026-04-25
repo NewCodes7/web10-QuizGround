@@ -81,12 +81,13 @@ services:
     image: grafana/pyroscope:1.7.1
     container_name: quizground-pyroscope
     restart: unless-stopped
-    # 0.0.0.0으로 바인딩: node-1/node-2 VM이 VPC 내부 IP로 프로파일을 push해야 함
-    # GCP 방화벽에서 4040 포트를 VPC 내부(10.10.0.0/16)에서만 허용할 것
     ports:
-      - "4040:4040"
+      - "127.0.0.1:4040:4040"
     volumes:
       - pyroscope_data:/data
+      - ./pyroscope/pyroscope.yml:/etc/pyroscope/config.yml:ro
+    command:
+      - -config.file=/etc/pyroscope/config.yml
     networks:
       - monitoring
 

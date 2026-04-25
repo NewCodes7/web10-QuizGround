@@ -41,6 +41,12 @@ envsubst '${NODE1_INTERNAL_IP} ${NODE2_INTERNAL_IP} ${REDIS_INTERNAL_IP}' \
   < "$DEPLOY_DIR/prometheus/prometheus.yml.template" \
   > "$DEPLOY_DIR/prometheus/prometheus.yml"
 
+# ── 3-1. pyroscope.yml 생성 (envsubst로 IP 치환) ─────────────────────
+echo "[DEPLOY] pyroscope.yml 생성 중 (내부 IP 치환)..."
+envsubst '${NODE1_INTERNAL_IP} ${NODE2_INTERNAL_IP}' \
+  < "$DEPLOY_DIR/pyroscope/pyroscope.yml.template" \
+  > "$DEPLOY_DIR/pyroscope/pyroscope.yml"
+
 # ── 4. .env 파일 생성 (Docker Compose 환경변수) ───────────────────────
 cat > "$DEPLOY_DIR/.env" << EOF
 REDIS_INTERNAL_IP=${REDIS_INTERNAL_IP}
