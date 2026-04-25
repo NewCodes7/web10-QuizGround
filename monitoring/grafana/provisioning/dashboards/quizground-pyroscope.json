@@ -61,23 +61,23 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "profileTypeId": "wall:wall:nanoseconds:wall:nanoseconds",
           "refId": "A"
         }
       ],
-      "title": "CPU Flamegraph (quizground.was)",
+      "title": "CPU Flamegraph / Wall-clock (quizground.was)",
       "type": "flamegraph"
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
       "id": 10,
-      "title": "메모리 프로파일링",
+      "title": "메모리 / CPU 상세 프로파일링",
       "type": "row"
     },
     {
       "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-      "description": "선택된 시간 범위에서 새로 할당된 메모리 출처. 넓은 블록 = 가장 많은 객체를 생성한 함수. GC 압박 원인 파악에 사용합니다.",
+      "description": "CPU wall-clock 샘플 횟수. 선택 시간 범위에서 가장 빈번하게 등장한 함수를 보여줍니다 (Node.js nodespy는 alloc 프로파일을 지원하지 않음).",
       "gridPos": { "h": 20, "w": 12, "x": 0, "y": 22 },
       "id": 11,
       "options": { "minRenderedBlocks": 1 },
@@ -85,11 +85,11 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "memory:alloc_objects:count:space:bytes",
+          "profileTypeId": "wall:samples:count:wall:nanoseconds",
           "refId": "A"
         }
       ],
-      "title": "메모리 할당 Flamegraph (alloc_objects)",
+      "title": "CPU Samples Flamegraph / Wall-clock count (quizground.was)",
       "type": "flamegraph"
     },
     {
@@ -102,7 +102,7 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "memory:inuse_space:bytes:space:bytes",
+          "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
           "refId": "A"
         }
       ],
