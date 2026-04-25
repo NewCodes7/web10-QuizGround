@@ -62,6 +62,7 @@
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "wall:wall:nanoseconds:wall:nanoseconds",
+          "queryType": "profile",
           "refId": "A"
         }
       ],
@@ -86,6 +87,7 @@
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "wall:samples:count:wall:nanoseconds",
+          "queryType": "profile",
           "refId": "A"
         }
       ],
@@ -103,6 +105,7 @@
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
+          "queryType": "profile",
           "refId": "A"
         }
       ],
