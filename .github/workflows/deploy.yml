@@ -54,7 +54,9 @@ jobs:
         run: npm ci
 
       - name: 프로덕션 .env 생성
-        run: echo '${{ secrets.ENV }}' > .env
+        run: |
+          echo '${{ secrets.ENV }}' > .env
+          echo "PYROSCOPE_SERVER_URL=${{ secrets.PYROSCOPE_SERVER_URL }}" >> .env
 
       # 테스트 활성화 시 주석 해제
       # - name: BE 단위 테스트
