@@ -43,7 +43,7 @@ export class MetricService {
       name: 'socket_latency_seconds',
       help: 'Latency of socket operations in seconds',
       labelNames: ['event', 'operation'],
-      buckets: promClient.linearBuckets(0, 0.1, 10)
+      buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30]
     });
 
     this.throughputGauge = new promClient.Gauge({

@@ -200,7 +200,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       name: 'position_flush_duration_ms',
       help: 'Time taken to flush one room in milliseconds',
       labelNames: ['gameId'],
-      buckets: [1, 5, 10, 20, 50, 100]
+      buckets: [5, 10, 20, 50, 100, 500, 1000, 2500, 5000, 10000, 20000, 30000]
     });
   }
 

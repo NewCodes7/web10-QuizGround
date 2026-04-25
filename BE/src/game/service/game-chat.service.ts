@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as promClient from 'prom-client';
 import { GameValidator } from '../middleware/game.validator';
 import { PositionBroadcastService } from './position-broadcast.service';
 import { ChatMessageModel } from '../entities/chat-message.entity';
@@ -113,6 +114,8 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
   /** MySQL 영속화 주기 타이머 */
   private persistTimer: NodeJS.Timeout;
 
+  private readonly broadcastDurationHistogram: promClient.Histogram;
+
   private server: Namespace;
 
   constructor(
@@ -126,6 +129,13 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       this.inTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
       this.outTimers.push({ offsetTimeout: null, interval: null, rooms: new Set() });
     }
+
+    this.broadcastDurationHistogram = new promClient.Histogram({
+      name: 'chat_broadcast_duration_ms',
+      help: 'Time taken to broadcast chat messages to one room in milliseconds',
+      labelNames: ['gameId'],
+      buckets: [5, 10, 20, 50, 100, 500, 1000, 2500, 5000, 10000, 20000, 30000]
+    });
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -515,6 +525,7 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       }
 
       const elapsed = Date.now() - start_ts;
+      this.broadcastDurationHistogram.labels(gameId).observe(elapsed);
       if (elapsed > CHAT_BATCH_TIME * 0.8) {
         this.logger.warn(
           `Room ${gameId} broadcastRoom took ${elapsed}ms (>${CHAT_BATCH_TIME * 0.8}ms threshold)`
