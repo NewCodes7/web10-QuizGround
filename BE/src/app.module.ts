@@ -45,8 +45,7 @@ import { MetricModule } from './metric/metric.module';
       migrations: [join(__dirname, 'database', 'migrations', '*.js')],
       migrationsRun: !process.env.DEV,
       migrationsTableName: 'typeorm_migrations',
-      logging: true, // 모든 쿼리 로깅
-      logger: 'advanced-console'
+      logging: process.env.DEV ? true : ['error', 'warn', 'migration'],
       // extra: {
       //   // 글로벌 batch size 설정
       //   maxBatchSize: 100
