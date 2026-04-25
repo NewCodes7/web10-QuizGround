@@ -8,7 +8,7 @@ import { KstLogger } from './common/logger/kst.logger';
 
 const pprofPort = process.env.PPROF_PORT ? parseInt(process.env.PPROF_PORT, 10) : null;
 if (pprofPort) {
-  pprof.heap.start(512 * 1024);
+  pprof.heap.start(512 * 1024, 64);
   createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://localhost');
     try {
