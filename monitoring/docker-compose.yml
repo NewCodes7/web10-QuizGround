@@ -43,6 +43,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_INSTALL_PLUGINS=grafana-pyroscope-app
+      - GF_PLUGIN_GRAFANA_PYROSCOPE_APP_ENABLED=true
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
