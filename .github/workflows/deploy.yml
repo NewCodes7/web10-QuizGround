@@ -150,6 +150,7 @@ jobs:
             cd ~/quizground/tobe
             tar -xzf be.tar.gz
             rm be.tar.gz
+            echo 'PYROSCOPE_INSTANCE=node1' >> .env
             chmod +x scripts/was-deploy.sh
             bash scripts/was-deploy.sh
           "
@@ -203,6 +204,7 @@ jobs:
             cd ~/quizground/tobe
             tar -xzf be.tar.gz
             rm be.tar.gz
+            echo 'PYROSCOPE_INSTANCE=node2' >> .env
             chmod +x scripts/was-deploy.sh
             bash scripts/was-deploy.sh
           "

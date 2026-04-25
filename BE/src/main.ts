@@ -1,4 +1,3 @@
-import 'pinpoint-node-agent';
 import Pyroscope from '@pyroscope/nodejs';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -10,7 +9,7 @@ if (process.env.PYROSCOPE_SERVER_URL) {
   Pyroscope.init({
     serverAddress: process.env.PYROSCOPE_SERVER_URL,
     appName: 'quizground.was',
-    tags: { instance: process.env.HOSTNAME ?? 'unknown' }
+    tags: { instance: process.env.PYROSCOPE_INSTANCE ?? process.env.HOSTNAME ?? 'unknown' }
   });
   Pyroscope.start();
 }
