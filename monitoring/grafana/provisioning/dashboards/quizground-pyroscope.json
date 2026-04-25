@@ -61,12 +61,12 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "wall:wall:nanoseconds:wall:nanoseconds",
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
           "queryType": "profile",
           "refId": "A"
         }
       ],
-      "title": "CPU Flamegraph / Wall-clock (quizground.was)",
+      "title": "CPU Flamegraph (quizground.was)",
       "type": "flamegraph"
     },
     {
@@ -78,7 +78,7 @@
     },
     {
       "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
-      "description": "CPU wall-clock 샘플 횟수. 선택 시간 범위에서 가장 빈번하게 등장한 함수를 보여줍니다 (Node.js nodespy는 alloc 프로파일을 지원하지 않음).",
+      "description": "CPU 샘플 횟수. 선택 시간 범위에서 가장 빈번하게 등장한 함수를 보여줍니다.",
       "gridPos": { "h": 20, "w": 12, "x": 0, "y": 22 },
       "id": 11,
       "options": { "minRenderedBlocks": 1 },
@@ -86,12 +86,12 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "wall:samples:count:wall:nanoseconds",
+          "profileTypeId": "process_cpu:samples:count:cpu:nanoseconds",
           "queryType": "profile",
           "refId": "A"
         }
       ],
-      "title": "CPU Samples Flamegraph / Wall-clock count (quizground.was)",
+      "title": "CPU Samples Flamegraph (quizground.was)",
       "type": "flamegraph"
     },
     {
@@ -104,7 +104,7 @@
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
-          "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
+          "profileTypeId": "memory:inuse_space:bytes:space:bytes",
           "queryType": "profile",
           "refId": "A"
         }
