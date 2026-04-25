@@ -4,7 +4,8 @@ module.exports = {
       name: 'quiz-ground-was',
       script: 'dist/src/main.js',
       env: {
-        WAS_PORT: 3000
+        WAS_PORT: 3000,
+        PYROSCOPE_SERVER_URL: process.env.PYROSCOPE_SERVER_URL
       }
     }
   ]
