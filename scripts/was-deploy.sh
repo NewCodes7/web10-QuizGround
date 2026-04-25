@@ -41,15 +41,6 @@ mv "$TOBE_DIR" "$CURRENT_DIR"
 mkdir -p "$DEPLOY_DIR/tobe"  # 다음 배포를 위해 재생성
 
 # ── 5. PM2로 BE 실행 ──────────────────────────────────────────────
-# .env의 환경변수(PYROSCOPE_SERVER_URL 등)를 PM2 프로세스에 주입
-ENV_FILE="$CURRENT_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
-
 # reload  : 기존 프로세스 있을 때 zero-downtime 재시작
 # start   : 최초 배포 시 fallback
 echo "[DEPLOY] PM2 프로세스 시작/재시작 중..."
