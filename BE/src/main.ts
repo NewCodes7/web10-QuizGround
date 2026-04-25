@@ -1,11 +1,19 @@
 import 'pinpoint-node-agent';
+import Pyroscope from '@pyroscope/nodejs';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { GameActivityInterceptor } from './game/middleware/game-activity.interceptor';
 import { KstLogger } from './common/logger/kst.logger';
 
-// env 불러오기
+if (process.env.PYROSCOPE_SERVER_URL) {
+  Pyroscope.init({
+    serverAddress: process.env.PYROSCOPE_SERVER_URL,
+    appName: 'quizground.was',
+    tags: { instance: process.env.HOSTNAME ?? 'unknown' }
+  });
+  Pyroscope.start();
+}
 
 async function bootstrap() {
   const logLevels: Array<'debug' | 'verbose' | 'log' | 'warn' | 'error' | 'fatal'> = process.env

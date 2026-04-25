@@ -222,9 +222,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     this.positionSubscriber = this.redis.duplicate();
     await this.positionSubscriber.psubscribe('position:*');
     this.positionSubscriber.on('pmessage', (_pattern, channel, message) => {
-      this.handlePositionMessage(channel, message).catch((err) => {
+      try {
+        this.handlePositionMessage(channel, message);
+      } catch (err) {
         this.logger.error(`[positionSub] handler error: ${(err as Error).message}`);
-      });
+      }
     });
     this.logger.verbose(`Position pub/sub subscriber started (serverId: ${this.serverId})`);
   }
@@ -627,9 +629,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
   private broadcastSlot(slotIndex: number): void {
     for (const gameId of this.outTimers[slotIndex].rooms) {
-      this.broadcastRoom(gameId).catch((err) => {
+      try {
+        this.broadcastRoom(gameId);
+      } catch (err) {
         this.logger.error(`broadcastRoom error for room ${gameId}: ${(err as Error).message}`);
-      });
+      }
     }
   }
 
@@ -637,13 +641,10 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    * OUT phase: drain pendingBroadcasts → socket.io emit.
    * Runs ~POSITION_BATCH_TIME/2 ms after writeRoom to ensure Redis writes complete first.
    *
-   * Two-step optimisation:
-   *   1. mergeBatches  — collapse N accumulated batches into one (latest position per player).
-   *      Prevents the O(N×sockets) positive-feedback loop when the event loop falls behind.
-   *   2. emitToRoomChunked — split the socket iteration into chunks with setImmediate yields,
-   *      so incoming callbacks can run between chunks regardless of room size.
+   * mergeBatches — collapse N accumulated batches into one (latest position per player).
+   * Prevents the O(N×sockets) positive-feedback loop when the event loop falls behind.
    */
-  private async broadcastRoom(gameId: string): Promise<void> {
+  private broadcastRoom(gameId: string): void {
     const pending = this.pendingBroadcasts.get(gameId);
     if (!pending || pending.length === 0) return;
 
@@ -655,11 +656,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
     if (aliveUpdates.length > 0) {
       const socketIds = [...(this.playerSocketMap.get(gameId)?.values() ?? [])];
-      await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+      this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
     }
 
     if (deadMessages.length > 0) {
-      await this.broadcastToDeadPlayersChunked(gameId, seq, deadMessages);
+      this.broadcastToDeadPlayers(gameId, seq, deadMessages);
     }
 
     const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
@@ -695,31 +696,6 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       for (const m of batch.deadMessages) deadMap.set(m.playerId, m);
     }
     return { seq, aliveUpdates: [...aliveMap.values()], deadMessages: [...deadMap.values()] };
-  }
-
-  /**
-   * socketIds 배열을 청크 단위로 나눠 emit하고 청크 사이마다 setImmediate로 이벤트 루프에 양보한다.
-   *
-   * 청크 크기는 플레이어 수에 따라 동적으로 결정한다:
-   *   chunkSize = Math.max(20, Math.ceil(socketIds.length / 10))
-   * 이렇게 하면 플레이어 수(200명이든 10,000명이든)와 무관하게 yield 횟수가 최대 9회로 고정된다.
-   *
-   * server.to(...chunk).emit()은 InMemoryAdapter 내부에서 패킷을 청크당 1회만 직렬화하므로
-   * socket.emit()을 개별 호출하는 것보다 직렬화 비용이 훨씬 적다.
-   */
-  private async emitToRoomChunked(
-    socketIds: string[],
-    event: string,
-    payload: unknown
-  ): Promise<void> {
-    if (socketIds.length === 0) return;
-    const chunkSize = Math.max(20, Math.ceil(socketIds.length / 10));
-    for (let i = 0; i < socketIds.length; i += chunkSize) {
-      this.server.to(socketIds.slice(i, i + chunkSize)).emit(event, payload);
-      if (i + chunkSize < socketIds.length) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
-    }
   }
 
   /**
@@ -843,7 +819,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    *   2. Ignore if this WAS has no local clients in the room.
    *   3. Split updates by alive/dead and broadcast with the same visibility policy as broadcastRoom.
    */
-  private async handlePositionMessage(channel: string, rawMessage: string): Promise<void> {
+  private handlePositionMessage(channel: string, rawMessage: string): void {
     let parsed: {
       serverId: string;
       gameId: string;
@@ -888,10 +864,10 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
     if (aliveUpdates.length > 0) {
       const socketIds = [...(this.playerSocketMap.get(gameId)?.values() ?? [])];
-      await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+      this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
     }
     if (deadMessages.length > 0) {
-      await this.broadcastToDeadPlayersChunked(gameId, seq, deadMessages);
+      this.broadcastToDeadPlayers(gameId, seq, deadMessages);
     }
 
     this.logger.debug(
@@ -901,17 +877,14 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   }
 
   /**
-   * 탈락한 플레이어들에게 dead 위치 업데이트를 청크 단위로 브로드캐스트한다.
+   * 탈락한 플레이어들에게 dead 위치 업데이트를 브로드캐스트한다.
    * Redis 조회 없이 인메모리 playerSocketMap / deadPlayerIds 만 사용한다.
-   *
-   * 기존 개별 socket.emit() 방식(패킷 직렬화 N회)을
-   * emitToRoomChunked(패킷 직렬화 청크당 1회)로 대체한다.
    */
-  private async broadcastToDeadPlayersChunked(
+  private broadcastToDeadPlayers(
     gameId: string,
     seq: number,
     deadMessages: PositionMessage[]
-  ): Promise<void> {
+  ): void {
     const deadSet = this.deadPlayerIds.get(gameId);
     if (!deadSet || deadSet.size === 0) return;
 
@@ -929,6 +902,6 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       if (socketId) socketIds.push(socketId);
     }
 
-    await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates });
+    this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates });
   }
 }
