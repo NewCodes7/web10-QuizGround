@@ -52,14 +52,14 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
       "description": "선택된 시간 범위의 CPU 사용 스택. 넓은 블록일수록 CPU를 많이 소비한 함수입니다. $instance 변수로 node1 / node2를 구분할 수 있습니다.",
       "gridPos": { "h": 20, "w": 12, "x": 12, "y": 1 },
       "id": 3,
       "options": { "minRenderedBlocks": 1 },
       "targets": [
         {
-          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "wall:wall:nanoseconds:wall:nanoseconds",
           "queryType": "profile",
@@ -77,14 +77,14 @@
       "type": "row"
     },
     {
-      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
       "description": "CPU wall-clock 샘플 횟수. 선택 시간 범위에서 가장 빈번하게 등장한 함수를 보여줍니다 (Node.js nodespy는 alloc 프로파일을 지원하지 않음).",
       "gridPos": { "h": 20, "w": 12, "x": 0, "y": 22 },
       "id": 11,
       "options": { "minRenderedBlocks": 1 },
       "targets": [
         {
-          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "wall:samples:count:wall:nanoseconds",
           "queryType": "profile",
@@ -95,14 +95,14 @@
       "type": "flamegraph"
     },
     {
-      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
       "description": "현재 힙에 남아 있는 메모리 출처. 메모리 누수가 의심될 때 확인합니다.",
       "gridPos": { "h": 20, "w": 12, "x": 12, "y": 22 },
       "id": 12,
       "options": { "minRenderedBlocks": 1 },
       "targets": [
         {
-          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
           "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
           "queryType": "profile",
@@ -140,14 +140,14 @@
       },
       {
         "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-        "definition": "label_values(instance)",
+        "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
+        "definition": "label_values({service_name=\"quizground.was\"}, instance)",
         "hide": 0,
         "includeAll": true,
         "multi": false,
         "name": "instance",
         "options": [],
-        "query": "label_values(instance)",
+        "query": "label_values({service_name=\"quizground.was\"}, instance)",
         "refresh": 2,
         "sort": 1,
         "type": "query"
