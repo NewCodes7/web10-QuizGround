@@ -8,7 +8,6 @@ module.exports = {
       script: 'dist/src/main.js',
       env: {
         WAS_PORT: 3000,
-        PPROF_PORT: 9999,
       }
     }
   ]

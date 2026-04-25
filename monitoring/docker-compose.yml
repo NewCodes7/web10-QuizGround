@@ -85,9 +85,6 @@ services:
       - "127.0.0.1:4040:4040"
     volumes:
       - pyroscope_data:/data
-      - ./pyroscope/pyroscope.yml:/etc/pyroscope/config.yml:ro
-    command:
-      - -config.file=/etc/pyroscope/config.yml
     networks:
       - monitoring
 

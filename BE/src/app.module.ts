@@ -23,6 +23,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { InactiveRoomScheduler } from './game/redis/inactive-room.scheduler';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { MetricModule } from './metric/metric.module';
+import { DebugModule } from './debug/debug.module';
 
 @Module({
   imports: [
@@ -61,7 +62,8 @@ import { MetricModule } from './metric/metric.module';
     WaitingRoomModule,
     TimeModule,
     AuthModule,
-    MetricModule
+    MetricModule,
+    DebugModule,
   ],
   controllers: [AppController, TimeController],
   providers: [
