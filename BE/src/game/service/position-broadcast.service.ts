@@ -636,6 +636,12 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /**
    * OUT phase: drain pendingBroadcasts → socket.io emit.
    * Runs ~POSITION_BATCH_TIME/2 ms after writeRoom to ensure Redis writes complete first.
+   *
+   * Two-step optimisation:
+   *   1. mergeBatches  — collapse N accumulated batches into one (latest position per player).
+   *      Prevents the O(N×sockets) positive-feedback loop when the event loop falls behind.
+   *   2. emitToRoomChunked — split the socket iteration into chunks with setImmediate yields,
+   *      so incoming callbacks can run between chunks regardless of room size.
    */
   private async broadcastRoom(gameId: string): Promise<void> {
     const pending = this.pendingBroadcasts.get(gameId);
@@ -644,22 +650,24 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const batches = pending.splice(0); // drain atomically
     if (!this.server) return;
 
+    const { seq, aliveUpdates, deadMessages } = this.mergeBatches(batches);
     const broadcastStart = Date.now();
-    for (const { seq, aliveUpdates, deadMessages } of batches) {
-      if (aliveUpdates.length > 0) {
-        this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
-      }
-      if (deadMessages.length > 0) {
-        this.broadcastToDeadPlayers(gameId, seq, deadMessages);
-      }
 
-      const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
-      const deadIds = deadMessages.map((m) => m.playerId).join(',');
-      this.logger.debug(
-        `[broadcastRoom] emit — gameId=${gameId} seq=${seq} ` +
-          `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}]`
-      );
+    if (aliveUpdates.length > 0) {
+      const socketIds = [...(this.playerSocketMap.get(gameId)?.values() ?? [])];
+      await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
     }
+
+    if (deadMessages.length > 0) {
+      await this.broadcastToDeadPlayersChunked(gameId, seq, deadMessages);
+    }
+
+    const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
+    const deadIds = deadMessages.map((m) => m.playerId).join(',');
+    this.logger.debug(
+      `[broadcastRoom] emit — gameId=${gameId} seq=${seq} mergedBatches=${batches.length} ` +
+        `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}]`
+    );
 
     const elapsed = Date.now() - broadcastStart;
     this.flushDurationHistogram.labels(gameId).observe(elapsed);
@@ -667,6 +675,50 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       this.logger.warn(
         `Room ${gameId} broadcast took ${elapsed}ms (>${POSITION_BATCH_TIME * 0.8}ms threshold)`
       );
+    }
+  }
+
+  /**
+   * N개 누적 배치를 플레이어당 최신 위치 하나로 병합한다.
+   *
+   * 배치를 오래된 순서로 순회하며 Map.set으로 덮어쓰면 마지막 값(=최신)이 자동으로 남는다.
+   * 결과 seq는 가장 마지막 배치의 값을 사용한다.
+   */
+  private mergeBatches(
+    batches: Array<{ seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] }>
+  ): { seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] } {
+    const seq = batches[batches.length - 1].seq;
+    const aliveMap = new Map<string, PositionUpdate>();
+    const deadMap = new Map<string, PositionMessage>();
+    for (const batch of batches) {
+      for (const u of batch.aliveUpdates) aliveMap.set(u.playerId, u);
+      for (const m of batch.deadMessages) deadMap.set(m.playerId, m);
+    }
+    return { seq, aliveUpdates: [...aliveMap.values()], deadMessages: [...deadMap.values()] };
+  }
+
+  /**
+   * socketIds 배열을 청크 단위로 나눠 emit하고 청크 사이마다 setImmediate로 이벤트 루프에 양보한다.
+   *
+   * 청크 크기는 플레이어 수에 따라 동적으로 결정한다:
+   *   chunkSize = Math.max(20, Math.ceil(socketIds.length / 10))
+   * 이렇게 하면 플레이어 수(200명이든 10,000명이든)와 무관하게 yield 횟수가 최대 9회로 고정된다.
+   *
+   * server.to(...chunk).emit()은 InMemoryAdapter 내부에서 패킷을 청크당 1회만 직렬화하므로
+   * socket.emit()을 개별 호출하는 것보다 직렬화 비용이 훨씬 적다.
+   */
+  private async emitToRoomChunked(
+    socketIds: string[],
+    event: string,
+    payload: unknown
+  ): Promise<void> {
+    if (socketIds.length === 0) return;
+    const chunkSize = Math.max(20, Math.ceil(socketIds.length / 10));
+    for (let i = 0; i < socketIds.length; i += chunkSize) {
+      this.server.to(socketIds.slice(i, i + chunkSize)).emit(event, payload);
+      if (i + chunkSize < socketIds.length) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
     }
   }
 
@@ -835,10 +887,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     }
 
     if (aliveUpdates.length > 0) {
-      this.server.to(gameId).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+      const socketIds = [...(this.playerSocketMap.get(gameId)?.values() ?? [])];
+      await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
     }
     if (deadMessages.length > 0) {
-      await this.broadcastToDeadPlayers(gameId, seq, deadMessages);
+      await this.broadcastToDeadPlayersChunked(gameId, seq, deadMessages);
     }
 
     this.logger.debug(
@@ -848,14 +901,17 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   }
 
   /**
-   * 탈락한 플레이어들에게 dead 위치 업데이트를 브로드캐스트한다.
+   * 탈락한 플레이어들에게 dead 위치 업데이트를 청크 단위로 브로드캐스트한다.
    * Redis 조회 없이 인메모리 playerSocketMap / deadPlayerIds 만 사용한다.
+   *
+   * 기존 개별 socket.emit() 방식(패킷 직렬화 N회)을
+   * emitToRoomChunked(패킷 직렬화 청크당 1회)로 대체한다.
    */
-  private broadcastToDeadPlayers(
+  private async broadcastToDeadPlayersChunked(
     gameId: string,
     seq: number,
     deadMessages: PositionMessage[]
-  ): void {
+  ): Promise<void> {
     const deadSet = this.deadPlayerIds.get(gameId);
     if (!deadSet || deadSet.size === 0) return;
 
@@ -867,11 +923,12 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       playerPosition: [m.positionX, m.positionY] as [number, number]
     }));
 
+    const socketIds: string[] = [];
     for (const playerId of deadSet) {
       const socketId = playerMap.get(playerId);
-      if (!socketId) continue;
-      const socket = this.server.sockets.get(socketId);
-      socket?.emit(SocketEvents.UPDATE_POSITION, { seq, updates });
+      if (socketId) socketIds.push(socketId);
     }
+
+    await this.emitToRoomChunked(socketIds, SocketEvents.UPDATE_POSITION, { seq, updates });
   }
 }
