@@ -53,15 +53,14 @@
     },
     {
       "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-      "description": "선택된 시간 범위의 CPU 사용 스택. 넓은 블록일수록 CPU를 많이 소비한 함수입니다. instance 태그로 node1 / node2를 구분할 수 있습니다.",
+      "description": "선택된 시간 범위의 CPU 사용 스택. 넓은 블록일수록 CPU를 많이 소비한 함수입니다. $instance 변수로 node1 / node2를 구분할 수 있습니다.",
       "gridPos": { "h": 20, "w": 12, "x": 12, "y": 1 },
       "id": 3,
       "options": { "minRenderedBlocks": 1 },
       "targets": [
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-          "groupBy": ["instance"],
-          "labelSelector": "{service_name=\"quizground.was\"}",
+          "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
           "refId": "A"
         }
@@ -85,13 +84,12 @@
       "targets": [
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-          "groupBy": ["instance"],
-          "labelSelector": "{service_name=\"quizground.was\"}",
-          "profileTypeId": "memory:alloc_space:bytes:alloc_space:bytes",
+          "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
+          "profileTypeId": "memory:alloc_objects:count:alloc_objects:count",
           "refId": "A"
         }
       ],
-      "title": "메모리 할당 Flamegraph (alloc_space)",
+      "title": "메모리 할당 Flamegraph (alloc_objects)",
       "type": "flamegraph"
     },
     {
@@ -103,8 +101,7 @@
       "targets": [
         {
           "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
-          "groupBy": ["instance"],
-          "labelSelector": "{service_name=\"quizground.was\"}",
+          "labelSelector": "{service_name=\"quizground.was\", instance=~\"${instance}\"}",
           "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
           "refId": "A"
         }
@@ -137,6 +134,20 @@
         "query": "grafana-pyroscope-datasource",
         "refresh": 1,
         "type": "datasource"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "grafana-pyroscope-datasource", "uid": "${pyroscope_ds}" },
+        "definition": "label_values(instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(instance)",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
