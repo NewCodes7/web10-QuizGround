@@ -7,7 +7,9 @@
       "Bash(git commit -m ':*)",
       "WebFetch(domain:snapshots.raintank.io)",
       "mcp__grafana__get_dashboard_summary",
-      "mcp__grafana__list_datasources"
+      "mcp__grafana__list_datasources",
+      "mcp__grafana__query_prometheus",
+      "mcp__grafana__get_dashboard_by_uid"
     ]
   },
   "enableAllProjectMcpServers": true,
