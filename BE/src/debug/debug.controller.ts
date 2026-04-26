@@ -399,7 +399,7 @@ function renderFlamegraph(profile) {
   chart = null;
 
   var data = v8ToD3(profile);
-  var width = document.getElementById('fg-container').clientWidth - 32 || 1100;
+  var width = Math.max(document.getElementById('fg-container').clientWidth - 32, 400);
 
   chart = flamegraph()
     .width(width)
@@ -499,7 +499,7 @@ function switchTab(id, el) {
 
 window.addEventListener('resize', function() {
   if (!chart) return;
-  var w = document.getElementById('fg-container').clientWidth - 32 || 1100;
+  var w = Math.max(document.getElementById('fg-container').clientWidth - 32, 400);
   chart.width(w);
 });
 </script>
