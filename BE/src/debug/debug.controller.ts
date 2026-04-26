@@ -322,6 +322,11 @@ function pollStatus(total) {
     try {
       const r = await fetch('/api/debug/flamegraph/status?token=' + TOKEN + '&jobId=' + jobId);
       const d = await r.json();
+      if (!r.ok) {
+        clearInterval(pollTimer);
+        showError(d.message || ('Server error ' + r.status + ' — 서버가 재시작됐을 수 있습니다. 다시 시도하세요.'));
+        return;
+      }
       if (d.status === 'done') {
         clearInterval(pollTimer);
         document.getElementById('status-box').style.display = 'none';
@@ -330,8 +335,10 @@ function pollStatus(total) {
         clearInterval(pollTimer);
         showError(d.error || 'Profiling failed');
       } else {
-        document.getElementById('prog').value = Math.min((d.elapsed / total) * 100, 99);
-        document.getElementById('status-text').textContent = 'Profiling… ' + d.remaining + 's remaining';
+        var elapsed = typeof d.elapsed === 'number' ? d.elapsed : 0;
+        var pct = total > 0 ? Math.min((elapsed / total) * 100, 99) : 0;
+        document.getElementById('prog').value = pct;
+        document.getElementById('status-text').textContent = 'Profiling… ' + (d.remaining != null ? d.remaining : '?') + 's remaining';
       }
     } catch(e) {
       clearInterval(pollTimer);
@@ -343,7 +350,12 @@ function pollStatus(total) {
 async function loadResult() {
   try {
     const r = await fetch('/api/debug/flamegraph/data?token=' + TOKEN + '&jobId=' + jobId);
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) {
+      var body = await r.text();
+      var msg;
+      try { msg = JSON.parse(body).message; } catch(_) { msg = body; }
+      throw new Error(msg || ('HTTP ' + r.status + ' — 서버가 재시작됐을 수 있습니다. 다시 시도하세요.'));
+    }
     const profile = await r.json();
 
     renderFlamegraph(profile);
