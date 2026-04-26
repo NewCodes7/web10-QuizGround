@@ -57,6 +57,15 @@ jobs:
         run: |
           echo '${{ secrets.ENV }}' > .env
 
+      - name: DEBUG_TOKEN 별도 Secret 주입 (선택)
+        env:
+          DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
+        run: |
+          if [ -n "$DEBUG_TOKEN" ]; then
+            sed -i '/^DEBUG_TOKEN=/d' .env
+            echo "DEBUG_TOKEN=$DEBUG_TOKEN" >> .env
+          fi
+
       # 테스트 활성화 시 주석 해제
       # - name: BE 단위 테스트
       #   working-directory: ./BE
