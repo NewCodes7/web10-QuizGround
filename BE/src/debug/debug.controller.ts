@@ -1,10 +1,14 @@
 import {
+  BadRequestException,
+  ConflictException,
   Controller,
   Get,
+  NotFoundException,
+  Post,
   Query,
   Res,
   ServiceUnavailableException,
-  UnauthorizedException,
+  UnauthorizedException
 } from '@nestjs/common';
 import { Response } from 'express';
 import { Session } from 'node:inspector/promises';
@@ -14,53 +18,145 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+interface ProfileJob {
+  status: 'running' | 'done' | 'error';
+  startTime: number;
+  seconds: number;
+  profile?: Profiler.Profile;
+  error?: string;
+}
+
 @Controller('api/debug')
 export class DebugController {
+  private readonly jobs = new Map<string, ProfileJob>();
+  private isProfileRunning = false;
+
   /**
-   * CPU 프로파일 수집 (V8 .cpuprofile)
-   * 사용: curl "http://node1:3000/api/debug/profile?token=SECRET&seconds=30" -o cpu.cpuprofile
-   * 분석: speedscope.app 또는 Chrome DevTools > Performance > Import
+   * CPU 플레임그래프 UI — 브라우저에서 버튼으로 프로파일링 트리거
+   * GET /api/debug/flamegraph?token=SECRET
+   */
+  @Get('flamegraph')
+  flamegraphUi(@Query('token') token: string, @Res() res: Response) {
+    this.validateToken(token);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(buildFlameUiHtml(token));
+  }
+
+  /**
+   * 백그라운드 프로파일링 시작 — 즉시 jobId 반환
+   * POST /api/debug/flamegraph/start?token=SECRET&seconds=30
+   */
+  @Post('flamegraph/start')
+  startProfile(@Query('token') token: string, @Query('seconds') seconds = '30') {
+    this.validateToken(token);
+    if (this.isProfileRunning) {
+      throw new ConflictException('Profile already running');
+    }
+
+    const secs = Math.min(Math.max(parseInt(seconds, 10) || 30, 5), 120);
+    const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    const job: ProfileJob = { status: 'running', startTime: Date.now(), seconds: secs };
+    this.jobs.set(jobId, job);
+    this.isProfileRunning = true;
+
+    this.collectProfile(secs)
+      .then((profile) => {
+        job.status = 'done';
+        job.profile = profile;
+      })
+      .catch((err: Error) => {
+        job.status = 'error';
+        job.error = err?.message ?? String(err);
+      })
+      .finally(() => {
+        this.isProfileRunning = false;
+        setTimeout(() => this.jobs.delete(jobId), 5 * 60 * 1000);
+      });
+
+    return { jobId, seconds: secs };
+  }
+
+  /**
+   * 프로파일링 상태 폴링 — 즉시 반환
+   * GET /api/debug/flamegraph/status?token=SECRET&jobId=JOB_ID
+   */
+  @Get('flamegraph/status')
+  profileStatus(@Query('token') token: string, @Query('jobId') jobId: string) {
+    this.validateToken(token);
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const elapsed = Math.floor((Date.now() - job.startTime) / 1000);
+    const remaining = Math.max(job.seconds - elapsed, 0);
+    return { status: job.status, elapsed, remaining, total: job.seconds, error: job.error };
+  }
+
+  /**
+   * 완료된 프로파일 데이터 반환 — 즉시 반환
+   * GET /api/debug/flamegraph/data?token=SECRET&jobId=JOB_ID
+   */
+  @Get('flamegraph/data')
+  profileData(@Query('token') token: string, @Query('jobId') jobId: string, @Res() res: Response) {
+    this.validateToken(token);
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+    if (job.status === 'running') {
+      throw new BadRequestException('Profile still running');
+    }
+    if (job.status === 'error') {
+      throw new BadRequestException(`Profile failed: ${job.error}`);
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(job.profile));
+  }
+
+  /**
+   * CPU 프로파일 직접 다운로드 (curl 용, 최대 60s)
+   * GET /api/debug/profile?token=SECRET&seconds=30
    */
   @Get('profile')
   async cpuProfile(
     @Query('token') token: string,
     @Query('seconds') seconds = '30',
-    @Res() res: Response,
+    @Res() res: Response
   ) {
     this.validateToken(token);
-
-    const profile = await this.collectProfile(parseInt(seconds, 10) || 30);
+    const profile = await this.collectProfile(Math.min(parseInt(seconds, 10) || 30, 60));
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="cpu-${Date.now()}.cpuprofile"`);
     res.send(JSON.stringify(profile));
   }
 
   /**
-   * CPU 플레임그래프 (브라우저에서 바로 시각화)
-   * 사용: 브라우저에서 http://node1:3000/api/debug/flamegraph?token=SECRET&seconds=30 접속
+   * 힙 스냅샷 다운로드
+   * GET /api/debug/heap?token=SECRET
    */
-  @Get('flamegraph')
-  async flamegraph(
-    @Query('token') token: string,
-    @Query('seconds') seconds = '30',
-    @Res() res: Response,
-  ) {
+  @Get('heap')
+  heapSnapshot(@Query('token') token: string, @Res() res: Response) {
     this.validateToken(token);
-
-    const profile = await this.collectProfile(parseInt(seconds, 10) || 30);
-    const html = buildFlameHtml(profile);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    const filePath = v8.writeHeapSnapshot(os.tmpdir());
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+    res.sendFile(filePath, (err) => {
+      fs.unlink(filePath, () => {});
+      if (err && !res.headersSent) {
+        res.status(500).end();
+      }
+    });
   }
 
   private async collectProfile(seconds: number): Promise<Profiler.Profile> {
-    const durationMs = Math.min(Math.max(seconds, 5), 60) * 1000;
     const session = new Session();
     session.connect();
     try {
       await session.post('Profiler.enable');
       await session.post('Profiler.start');
-      await new Promise<void>(resolve => setTimeout(resolve, durationMs));
+      await new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000));
       const { profile } = await session.post('Profiler.stop');
       return profile;
     } finally {
@@ -68,341 +164,345 @@ export class DebugController {
     }
   }
 
-  /**
-   * 힙 스냅샷 수집 (V8 .heapsnapshot)
-   * 사용: curl "http://node1:3000/api/debug/heap?token=SECRET" -o heap.heapsnapshot
-   * 분석: Chrome DevTools > Memory > Load
-   */
-  @Get('heap')
-  heapSnapshot(@Query('token') token: string, @Res() res: Response) {
-    this.validateToken(token);
-
-    const filePath = v8.writeHeapSnapshot(os.tmpdir());
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
-    res.sendFile(filePath, err => {
-      fs.unlink(filePath, () => {});
-      if (err && !res.headersSent) res.status(500).end();
-    });
-  }
-
   private validateToken(token: string) {
     const expected = process.env.DEBUG_TOKEN;
-    if (!expected) throw new ServiceUnavailableException('DEBUG_TOKEN not configured');
-    if (token !== expected) throw new UnauthorizedException();
+    if (!expected) {
+      throw new ServiceUnavailableException('DEBUG_TOKEN not configured');
+    }
+    if (token !== expected) {
+      throw new UnauthorizedException();
+    }
   }
 }
 
-// ─── HTML Flamegraph Builder ────────────────────────────────────────────────
+// ─── Flame UI HTML ──────────────────────────────────────────────────────────
 
-interface CpuNode {
-  id: number;
-  callFrame: { functionName: string; url: string; lineNumber: number };
-  hitCount?: number;
-  children?: number[];
-}
-
-function buildFlameHtml(profile: { nodes: CpuNode[]; samples?: number[]; timeDeltas?: number[] }): string {
-  const { nodes, samples = [], timeDeltas = [] } = profile;
-
-  // ── 1. top functions by self hitCount ──
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
-  const totalSamples = samples.length || nodes.reduce((s, n) => s + (n.hitCount ?? 0), 0);
-  const durationMs = timeDeltas.reduce((s, d) => s + d, 0) / 1000;
-
-  const ranked = [...nodes]
-    .filter(n => (n.hitCount ?? 0) > 0)
-    .sort((a, b) => (b.hitCount ?? 0) - (a.hitCount ?? 0))
-    .slice(0, 40)
-    .map(n => {
-      const pct = totalSamples > 0 ? (((n.hitCount ?? 0) / totalSamples) * 100).toFixed(1) : '0.0';
-      const fn = n.callFrame.functionName || '(anonymous)';
-      const src = n.callFrame.url
-        ? `${n.callFrame.url.replace(/.*\//, '')}:${n.callFrame.lineNumber}`
-        : '';
-      return { fn, src, hits: n.hitCount ?? 0, pct };
-    });
-
-  // ── 2. call-stack flame data from samples ──
-  const parentMap = new Map<number, number>();
-  for (const node of nodes) {
-    for (const childId of node.children ?? []) {
-      parentMap.set(childId, node.id);
-    }
-  }
-
-  // aggregate (stack → count)
-  const stackCounts = new Map<string, number>();
-  for (const sampleId of samples) {
-    const stack: string[] = [];
-    let id: number | undefined = sampleId;
-    while (id !== undefined) {
-      const node = nodeMap.get(id);
-      if (!node) break;
-      const fn = node.callFrame.functionName || '(anon)';
-      stack.unshift(fn);
-      id = parentMap.get(id);
-    }
-    const key = stack.join(';');
-    stackCounts.set(key, (stackCounts.get(key) ?? 0) + 1);
-  }
-
-  // collapsed stacks format for canvas renderer
-  const stacksJson = JSON.stringify(
-    [...stackCounts.entries()].map(([stack, count]) => ({ stack, count })),
-  );
-
-  const rowsHtml = ranked
-    .map(
-      (r, i) => `<tr>
-        <td>${i + 1}</td>
-        <td class="fn">${esc(r.fn)}</td>
-        <td class="src">${esc(r.src)}</td>
-        <td>${r.hits}</td>
-        <td>
-          <div class="bar-wrap"><div class="bar" style="width:${r.pct}%"></div></div>
-          ${r.pct}%
-        </td>
-      </tr>`,
-    )
-    .join('');
-
-  const profileJson = JSON.stringify(profile);
-
+function buildFlameUiHtml(token: string): string {
+  const safeToken = JSON.stringify(token);
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CPU Flamegraph</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/d3-flame-graph@4/dist/d3-flamegraph.css">
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font:14px/1.5 'Segoe UI',system-ui,sans-serif;background:#0f0f13;color:#e0e0e0;padding:24px}
-  h1{font-size:20px;margin-bottom:4px;color:#fff}
-  .meta{color:#888;font-size:12px;margin-bottom:20px}
-  .tabs{display:flex;gap:8px;margin-bottom:16px}
-  .tab{padding:6px 16px;border-radius:6px;background:#1e1e2e;border:1px solid #333;cursor:pointer;color:#aaa;font-size:13px}
-  .tab.active{background:#4f46e5;border-color:#4f46e5;color:#fff}
-  .panel{display:none}.panel.active{display:block}
-  /* table */
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th{text-align:left;padding:8px 12px;background:#1a1a2e;color:#888;font-weight:500;position:sticky;top:0}
-  td{padding:7px 12px;border-bottom:1px solid #1e1e2e}
-  tr:hover td{background:#1a1a2e}
-  .fn{color:#93c5fd;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .src{color:#6b7280;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bar-wrap{display:inline-block;width:80px;height:10px;background:#1e1e2e;border-radius:3px;vertical-align:middle;margin-right:6px}
-  .bar{height:100%;border-radius:3px;background:linear-gradient(90deg,#4f46e5,#7c3aed)}
-  /* canvas */
-  #canvas-wrap{overflow:auto;background:#141414;border-radius:8px}
-  canvas{display:block;cursor:crosshair}
-  #tooltip{position:fixed;background:#1e1e2e;border:1px solid #333;border-radius:6px;padding:8px 12px;font-size:12px;pointer-events:none;display:none;max-width:400px;word-break:break-all;z-index:9}
-  .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:6px;background:#4f46e5;color:#fff;font-size:13px;border:none;cursor:pointer;margin-bottom:16px}
-  .btn:hover{background:#4338ca}
-  .notice{color:#6b7280;font-size:12px;margin-top:12px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.6 'Segoe UI',system-ui,sans-serif;background:#0f0f13;color:#e0e0e0;padding:24px}
+h1{font-size:22px;color:#fff;margin-bottom:4px}
+.subtitle{color:#555;font-size:12px;margin-bottom:24px}
+.controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:#1a1a2e;border-radius:10px;padding:16px 20px;margin-bottom:20px}
+label{color:#aaa;font-size:13px}
+input[type=range]{width:160px;accent-color:#4f46e5}
+#seconds-val{font-weight:600;color:#fff;min-width:40px}
+.btn{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:background .15s}
+.btn-primary{background:#4f46e5;color:#fff}
+.btn-primary:hover:not(:disabled){background:#4338ca}
+.btn-primary:disabled{background:#2a2a3e;color:#555;cursor:not-allowed}
+.btn-sm{padding:6px 14px;border-radius:6px;border:1px solid #333;background:#1e1e2e;color:#aaa;font-size:12px;cursor:pointer}
+.btn-sm:hover{background:#252535;color:#ddd}
+#status-box{display:none;background:#1a1a2e;border-radius:10px;padding:16px 20px;margin-bottom:20px}
+.status-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.spinner{width:16px;height:16px;border:2px solid #2a2a3e;border-top-color:#4f46e5;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+#status-text{color:#aaa;font-size:13px}
+progress{width:100%;height:6px;border-radius:3px;appearance:none;background:#2a2a3e}
+progress::-webkit-progress-bar{background:#2a2a3e;border-radius:3px}
+progress::-webkit-progress-value{background:linear-gradient(90deg,#4f46e5,#7c3aed);border-radius:3px}
+#error-box{display:none;background:#1f1015;border:1px solid #7f1d1d;border-radius:10px;padding:14px 18px;color:#fca5a5;margin-bottom:20px;font-size:13px}
+#results{display:none}
+.results-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.results-meta{color:#666;font-size:12px}
+.btn-group{display:flex;gap:8px;align-items:center}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{padding:6px 16px;border-radius:6px;background:#1e1e2e;border:1px solid #2a2a3e;cursor:pointer;color:#888;font-size:13px;transition:all .15s}
+.tab.active{background:#4f46e5;border-color:#4f46e5;color:#fff}
+.panel{display:none}.panel.active{display:block}
+#fg-container{background:#141420;border-radius:10px;padding:16px;overflow-x:auto;min-height:120px}
+.d3-flame-graph rect{stroke:#0f0f13;stroke-width:0.5px}
+.d3-flame-graph text{font-size:11px}
+.search-wrap{display:flex;gap:8px;margin-bottom:12px;align-items:center}
+#fg-search{flex:1;max-width:320px;padding:6px 12px;border-radius:6px;background:#1e1e2e;border:1px solid #333;color:#e0e0e0;font-size:13px}
+#fg-search:focus{outline:none;border-color:#4f46e5}
+.notice{color:#444;font-size:11px;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;background:#1a1a2e;color:#888;font-weight:500;position:sticky;top:0}
+td{padding:7px 12px;border-bottom:1px solid #1a1a2e}
+tr:hover td{background:#1a1a2e}
+.fn{color:#93c5fd;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;font-size:12px}
+.src{color:#6b7280;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-wrap{display:inline-block;width:80px;height:8px;background:#1e1e2e;border-radius:3px;vertical-align:middle;margin-right:6px}
+.bar{height:100%;border-radius:3px;background:linear-gradient(90deg,#4f46e5,#7c3aed)}
+a.btn-sm{text-decoration:none}
 </style>
 </head>
 <body>
 <h1>CPU Flamegraph</h1>
-<div class="meta">
-  Duration: <b>${durationMs.toFixed(0)} ms</b> &nbsp;|&nbsp;
-  Samples: <b>${totalSamples}</b> &nbsp;|&nbsp;
-  Collected: <b>${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</b>
+<p class="subtitle">V8 CPU Profiler — QuizGround Debug</p>
+
+<div class="controls">
+  <label for="seconds-slider">Duration</label>
+  <input type="range" id="seconds-slider" min="10" max="120" value="30" step="5">
+  <span id="seconds-val">30s</span>
+  <button class="btn btn-primary" id="start-btn" onclick="startProfile()">&#9654; Start Profiling</button>
 </div>
 
-<button class="btn" onclick="download()">&#8659; .cpuprofile 다운로드</button>
-
-<div class="tabs">
-  <button class="tab active" onclick="switchTab('flame',this)">Flame Graph</button>
-  <button class="tab" onclick="switchTab('table',this)">Top Functions</button>
+<div id="status-box">
+  <div class="status-row">
+    <div class="spinner"></div>
+    <span id="status-text">Profiling...</span>
+  </div>
+  <progress id="prog" value="0" max="100"></progress>
 </div>
 
-<div id="flame" class="panel active">
-  <div id="canvas-wrap"><canvas id="fg"></canvas></div>
-  <div id="tooltip"></div>
-  <p class="notice">클릭으로 확대 · 우클릭으로 축소 · 마우스 오버로 함수 정보</p>
+<div id="error-box"></div>
+
+<div id="results">
+  <div class="results-header">
+    <span class="results-meta" id="results-meta"></span>
+    <div class="btn-group">
+      <button class="btn-sm" onclick="resetUi()">&#8635; Re-profile</button>
+      <a id="dl-btn" class="btn-sm">&#8659; .cpuprofile</a>
+      <a href="https://speedscope.app" target="_blank" class="btn-sm">speedscope &#8599;</a>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('flame',this)">Flame Graph</button>
+    <button class="tab" onclick="switchTab('table',this)">Top Functions</button>
+  </div>
+
+  <div id="flame" class="panel active">
+    <div class="search-wrap">
+      <input id="fg-search" type="search" placeholder="Search functions..." oninput="searchFg(this.value)">
+      <button class="btn-sm" onclick="clearSearch()">Clear</button>
+    </div>
+    <div id="fg-container"><div id="flamegraph"></div></div>
+    <p class="notice">클릭: 줌인 &middot; 더블클릭(루트): 리셋 &middot; 검색: 함수명 하이라이트</p>
+  </div>
+
+  <div id="table" class="panel">
+    <table>
+      <thead><tr><th>#</th><th>Function</th><th>Source</th><th>Hits</th><th>Self %</th></tr></thead>
+      <tbody id="top-tbody"></tbody>
+    </table>
+  </div>
 </div>
 
-<div id="table" class="panel">
-  <table>
-    <thead><tr><th>#</th><th>Function</th><th>Source</th><th>Hits</th><th>Self %</th></tr></thead>
-    <tbody>${rowsHtml}</tbody>
-  </table>
-</div>
-
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-flame-graph@4/dist/d3-flamegraph.min.js"></script>
 <script>
-const STACKS = ${stacksJson};
-const PROFILE_JSON = ${profileJson};
+const TOKEN = ${safeToken};
+let jobId = null, pollTimer = null, chart = null;
 
-// ── flamegraph renderer ──────────────────────────────────────────────
-const COLORS = ['#4f46e5','#7c3aed','#0ea5e9','#06b6d4','#10b981','#84cc16','#f59e0b','#ef4444'];
-function color(name) {
-  let h = 0; for (let i=0; i<name.length; i++) h = (h*31+name.charCodeAt(i))>>>0;
-  return COLORS[h % COLORS.length];
+const startBtn = document.getElementById('start-btn');
+const slider   = document.getElementById('seconds-slider');
+const secVal   = document.getElementById('seconds-val');
+
+slider.addEventListener('input', () => { secVal.textContent = slider.value + 's'; });
+
+// ── Start profiling ───────────────────────────────────────────────────────
+async function startProfile() {
+  const seconds = slider.value;
+  setUiState('running');
+
+  try {
+    const r = await fetch('/api/debug/flamegraph/start?token=' + TOKEN + '&seconds=' + seconds, { method: 'POST' });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.message || r.statusText);
+    jobId = body.jobId;
+    pollStatus(body.seconds);
+  } catch(e) {
+    showError(e.message);
+  }
 }
 
-let root, canvas, ctx, tooltip, viewStack = [];
-
-function buildTree() {
-  const tree = {};
-  for (const {stack, count} of STACKS) {
-    const frames = stack.split(';');
-    let node = tree;
-    for (const f of frames) {
-      node[f] = node[f] || { _count: 0, _self: 0 };
-      node[f]._count += count;
-      node = node[f];
+function pollStatus(total) {
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/debug/flamegraph/status?token=' + TOKEN + '&jobId=' + jobId);
+      const d = await r.json();
+      if (d.status === 'done') {
+        clearInterval(pollTimer);
+        document.getElementById('status-box').style.display = 'none';
+        loadResult();
+      } else if (d.status === 'error') {
+        clearInterval(pollTimer);
+        showError(d.error || 'Profiling failed');
+      } else {
+        document.getElementById('prog').value = Math.min((d.elapsed / total) * 100, 99);
+        document.getElementById('status-text').textContent = 'Profiling… ' + d.remaining + 's remaining';
+      }
+    } catch(e) {
+      clearInterval(pollTimer);
+      showError(e.message);
     }
-    // last frame gets self count
-    const last = frames.reduce((n,f)=>n[f], tree);
-    last._self += count;
-  }
-  return tree;
+  }, 1000);
 }
 
-function flattenTree(node, name, depth, start, total, out) {
-  const w = node._count / total;
-  out.push({ name, depth, x: start, w, self: node._self });
-  const children = Object.entries(node).filter(([k])=>!k.startsWith('_'));
-  children.sort((a,b)=>b[1]._count - a[1]._count);
-  let cx = start;
-  for (const [k,v] of children) {
-    flattenTree(v, k, depth+1, cx, total, out);
-    cx += v._count / total;
-  }
-}
+async function loadResult() {
+  try {
+    const r = await fetch('/api/debug/flamegraph/data?token=' + TOKEN + '&jobId=' + jobId);
+    if (!r.ok) throw new Error(await r.text());
+    const profile = await r.json();
 
-function render() {
-  if (!STACKS.length) {
-    ctx.fillStyle = '#888';
-    ctx.font = '14px sans-serif';
-    ctx.fillText('샘플 데이터 없음 — samples[] 배열이 비어있습니다', 20, 40);
-    return;
-  }
+    renderFlamegraph(profile);
+    buildTopTable(profile);
+    setupDownload(profile);
 
-  const tree = buildTree();
-  const total = Object.values(tree).reduce((s,v)=>s+(v._count||0),0) || 1;
-  const bars = [];
-  for (const [k,v] of Object.entries(tree)) flattenTree(v, k, 0, 0, total, bars);
-  if (!bars.length) return;
+    const samples = (profile.samples || []).length;
+    const durationMs = ((profile.timeDeltas || []).reduce((s, d) => s + d, 0) / 1000).toFixed(0);
+    document.getElementById('results-meta').textContent =
+      'Samples: ' + samples + '  |  Duration: ' + durationMs + 'ms  |  ' +
+      new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
 
-  const maxDepth = bars.reduce((m,b)=>Math.max(m,b.depth),0);
-  const ROW = 22;
-  const W = canvas.parentElement.clientWidth || 1200;
-  canvas.width = W;
-  canvas.height = (maxDepth + 1) * ROW + 4;
-  canvas.style.width = W + 'px';
-  canvas.style.height = canvas.height + 'px';
-
-  // current view defines zoom
-  const [viewX, viewW] = viewStack.length ? viewStack[viewStack.length-1] : [0, 1];
-
-  ctx.clearRect(0, 0, W, canvas.height);
-  ctx.font = '11px "Segoe UI",sans-serif';
-
-  canvas._bars = bars;
-  canvas._ROW = ROW;
-  canvas._W = W;
-  canvas._viewX = viewX;
-  canvas._viewW = viewW;
-
-  for (const b of bars) {
-    // transform to view
-    const rx = (b.x - viewX) / viewW;
-    const rw = b.w / viewW;
-    if (rx + rw < 0 || rx > 1) continue;
-    const px = Math.max(rx * W, 0);
-    const pw = Math.min(rw * W, W - px);
-    if (pw < 1) continue;
-
-    const y = (maxDepth - b.depth) * ROW;
-    ctx.fillStyle = color(b.name);
-    ctx.fillRect(px+1, y+1, pw-2, ROW-2);
-
-    if (pw > 30) {
-      ctx.fillStyle = '#fff';
-      ctx.save();
-      ctx.rect(px+2, y, pw-4, ROW);
-      ctx.clip();
-      ctx.fillText(b.name, px+4, y+15);
-      ctx.restore();
-    }
+    document.getElementById('results').style.display = 'block';
+    startBtn.disabled = false;
+  } catch(e) {
+    showError(e.message);
   }
 }
 
-function initCanvas() {
-  canvas = document.getElementById('fg');
-  ctx = canvas.getContext('2d');
-  tooltip = document.getElementById('tooltip');
+// ── V8 Profile → d3-flame-graph hierarchy ────────────────────────────────
+function v8ToD3(profile) {
+  var nodeMap = new Map(profile.nodes.map(function(n) { return [n.id, n]; }));
 
-  canvas.addEventListener('mousemove', e => {
-    const b = hitTest(e);
-    if (!b) { tooltip.style.display='none'; return; }
-    const pct = (b.w*100).toFixed(2);
-    const self = (b.self/(canvas._bars.reduce((s,x)=>x.depth===0?s+x.w:s,0)||1)*100).toFixed(2);
-    tooltip.innerHTML = \`<b>\${b.name}</b><br>Total: \${pct}% · Self: \${self}%\`;
-    tooltip.style.display='block';
-    tooltip.style.left = (e.clientX+12)+'px';
-    tooltip.style.top = (e.clientY+12)+'px';
-  });
-  canvas.addEventListener('mouseleave', ()=>{ tooltip.style.display='none'; });
-  canvas.addEventListener('click', e => {
-    const b = hitTest(e);
-    if (!b) return;
-    viewStack.push([b.x, b.w]);
-    render();
-  });
-  canvas.addEventListener('contextmenu', e => {
-    e.preventDefault();
-    if (viewStack.length) { viewStack.pop(); render(); }
-  });
+  function convert(nodeId) {
+    var node = nodeMap.get(nodeId);
+    if (!node) return null;
+    var fn   = node.callFrame.functionName || '(anonymous)';
+    var url  = node.callFrame.url || '';
+    var file = url.split('/').pop() || '';
+    var line = node.callFrame.lineNumber || 0;
+    var label = file ? fn + ' (' + file + ':' + line + ')' : fn;
 
-  render();
-}
+    var children = (node.children || []).map(convert).filter(Boolean);
+    var childVal = children.reduce(function(s, c) { return s + c.value; }, 0);
+    var selfVal  = node.hitCount || 0;
 
-function hitTest(e) {
-  if (!canvas._bars) return null;
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-  const maxDepth = canvas._bars.reduce((m,b)=>Math.max(m,b.depth),0);
-  const ROW = canvas._ROW, W = canvas._W;
-  const viewX = canvas._viewX, viewW = canvas._viewW;
-  for (const b of canvas._bars) {
-    const rx = (b.x - viewX) / viewW;
-    const rw = b.w / viewW;
-    const px = Math.max(rx * W, 0);
-    const pw = Math.min(rw * W, W - px);
-    const y = (maxDepth - b.depth) * ROW;
-    if (mx >= px && mx <= px+pw && my >= y && my <= y+ROW) return b;
+    return { name: label, value: selfVal + childVal, children: children.length ? children : undefined };
   }
-  return null;
+
+  var childIds = new Set(profile.nodes.reduce(function(acc, n) {
+    return acc.concat(n.children || []);
+  }, []));
+  var root = profile.nodes.find(function(n) { return !childIds.has(n.id); });
+  if (!root) return { name: '(root)', value: 1 };
+  var tree = convert(root.id);
+  return tree && tree.value > 0 ? tree : { name: '(root)', value: 1 };
 }
 
-// ── tab switch ──────────────────────────────────────────────────────
+// ── Render flamegraph ─────────────────────────────────────────────────────
+function renderFlamegraph(profile) {
+  var container = document.getElementById('flamegraph');
+  container.innerHTML = '';
+  chart = null;
+
+  var data = v8ToD3(profile);
+  var width = document.getElementById('fg-container').clientWidth - 32 || 1100;
+
+  chart = flamegraph()
+    .width(width)
+    .cellHeight(18)
+    .transitionDuration(400)
+    .minFrameSize(5)
+    .sort(true)
+    .title('');
+
+  d3.select('#flamegraph').datum(data).call(chart);
+}
+
+function searchFg(term) {
+  if (!chart) return;
+  term ? chart.search(term) : chart.resetHighlight();
+}
+
+function clearSearch() {
+  document.getElementById('fg-search').value = '';
+  if (chart) chart.resetHighlight();
+}
+
+// ── Top functions table ───────────────────────────────────────────────────
+function buildTopTable(profile) {
+  var nodes   = profile.nodes || [];
+  var samples = (profile.samples || []).length;
+  var total   = samples || nodes.reduce(function(s, n) { return s + (n.hitCount || 0); }, 0);
+
+  var rows = nodes
+    .filter(function(n) { return (n.hitCount || 0) > 0; })
+    .sort(function(a, b) { return (b.hitCount || 0) - (a.hitCount || 0); })
+    .slice(0, 50)
+    .map(function(n, i) {
+      var pct = total > 0 ? ((n.hitCount / total) * 100).toFixed(1) : '0.0';
+      var fn  = esc(n.callFrame.functionName || '(anonymous)');
+      var url = n.callFrame.url || '';
+      var src = esc(url ? url.replace(/.*\\//, '') + ':' + n.callFrame.lineNumber : '');
+      return '<tr><td>' + (i+1) + '</td>' +
+             '<td class="fn" title="' + fn + '">' + fn + '</td>' +
+             '<td class="src" title="' + src + '">' + src + '</td>' +
+             '<td>' + (n.hitCount || 0) + '</td>' +
+             '<td><span class="bar-wrap"><span class="bar" style="width:' + pct + '%"></span></span>' + pct + '%</td></tr>';
+    });
+
+  document.getElementById('top-tbody').innerHTML = rows.join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Download ──────────────────────────────────────────────────────────────
+function setupDownload(profile) {
+  var blob = new Blob([JSON.stringify(profile)], { type: 'application/json' });
+  var dl   = document.getElementById('dl-btn');
+  if (dl._url) URL.revokeObjectURL(dl._url);
+  dl._url   = URL.createObjectURL(blob);
+  dl.href   = dl._url;
+  dl.download = 'cpu-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.cpuprofile';
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function setUiState(state) {
+  if (state === 'running') {
+    startBtn.disabled = true;
+    document.getElementById('status-box').style.display = 'block';
+    document.getElementById('error-box').style.display  = 'none';
+    document.getElementById('results').style.display    = 'none';
+    document.getElementById('prog').value = 0;
+    document.getElementById('status-text').textContent  = 'Starting…';
+  }
+}
+
+function showError(msg) {
+  clearInterval(pollTimer);
+  document.getElementById('status-box').style.display = 'none';
+  var eb = document.getElementById('error-box');
+  eb.style.display = 'block';
+  eb.textContent   = '❌ ' + msg;
+  startBtn.disabled = false;
+}
+
+function resetUi() {
+  clearInterval(pollTimer);
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('flamegraph').innerHTML   = '';
+  chart = null;
+  startBtn.disabled = false;
+}
+
 function switchTab(id, el) {
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.tab').forEach(function(t)   { t.classList.remove('active'); });
   document.getElementById(id).classList.add('active');
   el.classList.add('active');
-  if (id === 'flame') render();
 }
 
-// ── download ────────────────────────────────────────────────────────
-function download() {
-  const blob = new Blob([JSON.stringify(PROFILE_JSON)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'cpu-${Date.now()}.cpuprofile';
-  a.click();
-}
-
-window.addEventListener('load', initCanvas);
-window.addEventListener('resize', ()=>{ if(document.getElementById('flame').classList.contains('active')) render(); });
+window.addEventListener('resize', function() {
+  if (!chart) return;
+  var w = document.getElementById('fg-container').clientWidth - 32 || 1100;
+  chart.width(w);
+});
 </script>
 </body>
 </html>`;
-}
-
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
