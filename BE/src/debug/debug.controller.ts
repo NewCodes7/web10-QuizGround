@@ -10,6 +10,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException
 } from '@nestjs/common';
+import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Response } from 'express';
 import { Session } from 'node:inspector/promises';
 import type { Profiler } from 'node:inspector';
@@ -17,19 +18,20 @@ import * as v8 from 'node:v8';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Redis from 'ioredis';
 
-interface ProfileJob {
+interface JobMeta {
   status: 'running' | 'done' | 'error';
   startTime: number;
   seconds: number;
-  profile?: Profiler.Profile;
   error?: string;
 }
 
+const LOCK_KEY = 'Debug:ProfileLock';
+
 @Controller('api/debug')
 export class DebugController {
-  private readonly jobs = new Map<string, ProfileJob>();
-  private isProfileRunning = false;
+  constructor(@InjectRedis() private readonly redis: Redis) {}
 
   /**
    * CPU 플레임그래프 UI — 브라우저에서 버튼으로 프로파일링 트리거
@@ -47,30 +49,43 @@ export class DebugController {
    * POST /api/debug/flamegraph/start?token=SECRET&seconds=30
    */
   @Post('flamegraph/start')
-  startProfile(@Query('token') token: string, @Query('seconds') seconds = '30') {
+  async startProfile(@Query('token') token: string, @Query('seconds') seconds = '30') {
     this.validateToken(token);
-    if (this.isProfileRunning) {
+
+    const secs = Math.min(Math.max(parseInt(seconds, 10) || 30, 5), 120);
+    const locked = await this.redis.set(LOCK_KEY, '1', 'EX', secs + 60, 'NX');
+    if (!locked) {
       throw new ConflictException('Profile already running');
     }
 
-    const secs = Math.min(Math.max(parseInt(seconds, 10) || 30, 5), 120);
     const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    const job: ProfileJob = { status: 'running', startTime: Date.now(), seconds: secs };
-    this.jobs.set(jobId, job);
-    this.isProfileRunning = true;
+    const meta: JobMeta = { status: 'running', startTime: Date.now(), seconds: secs };
+    await this.redis.set(`Debug:Job:${jobId}`, JSON.stringify(meta), 'EX', secs + 60);
 
     this.collectProfile(secs)
-      .then((profile) => {
-        job.status = 'done';
-        job.profile = profile;
+      .then(async (profile) => {
+        const raw = await this.redis.get(`Debug:Job:${jobId}`);
+        const prev: JobMeta = raw ? JSON.parse(raw) : meta;
+        await this.redis.set(
+          `Debug:Job:${jobId}`,
+          JSON.stringify({ ...prev, status: 'done' }),
+          'EX',
+          300
+        );
+        await this.redis.set(`Debug:Job:${jobId}:Data`, JSON.stringify(profile), 'EX', 300);
       })
-      .catch((err: Error) => {
-        job.status = 'error';
-        job.error = err?.message ?? String(err);
+      .catch(async (err: Error) => {
+        const raw = await this.redis.get(`Debug:Job:${jobId}`);
+        const prev: JobMeta = raw ? JSON.parse(raw) : meta;
+        await this.redis.set(
+          `Debug:Job:${jobId}`,
+          JSON.stringify({ ...prev, status: 'error', error: err?.message ?? String(err) }),
+          'EX',
+          300
+        );
       })
-      .finally(() => {
-        this.isProfileRunning = false;
-        setTimeout(() => this.jobs.delete(jobId), 5 * 60 * 1000);
+      .finally(async () => {
+        await this.redis.del(LOCK_KEY);
       });
 
     return { jobId, seconds: secs };
@@ -81,13 +96,14 @@ export class DebugController {
    * GET /api/debug/flamegraph/status?token=SECRET&jobId=JOB_ID
    */
   @Get('flamegraph/status')
-  profileStatus(@Query('token') token: string, @Query('jobId') jobId: string) {
+  async profileStatus(@Query('token') token: string, @Query('jobId') jobId: string) {
     this.validateToken(token);
-    const job = this.jobs.get(jobId);
-    if (!job) {
+    const raw = await this.redis.get(`Debug:Job:${jobId}`);
+    if (!raw) {
       throw new NotFoundException('Job not found');
     }
 
+    const job: JobMeta = JSON.parse(raw);
     const elapsed = Math.floor((Date.now() - job.startTime) / 1000);
     const remaining = Math.max(job.seconds - elapsed, 0);
     return { status: job.status, elapsed, remaining, total: job.seconds, error: job.error };
@@ -98,12 +114,17 @@ export class DebugController {
    * GET /api/debug/flamegraph/data?token=SECRET&jobId=JOB_ID
    */
   @Get('flamegraph/data')
-  profileData(@Query('token') token: string, @Query('jobId') jobId: string, @Res() res: Response) {
+  async profileData(
+    @Query('token') token: string,
+    @Query('jobId') jobId: string,
+    @Res() res: Response
+  ) {
     this.validateToken(token);
-    const job = this.jobs.get(jobId);
-    if (!job) {
+    const raw = await this.redis.get(`Debug:Job:${jobId}`);
+    if (!raw) {
       throw new NotFoundException('Job not found');
     }
+    const job: JobMeta = JSON.parse(raw);
     if (job.status === 'running') {
       throw new BadRequestException('Profile still running');
     }
@@ -111,8 +132,12 @@ export class DebugController {
       throw new BadRequestException(`Profile failed: ${job.error}`);
     }
 
+    const data = await this.redis.get(`Debug:Job:${jobId}:Data`);
+    if (!data) {
+      throw new NotFoundException('Profile data not found');
+    }
     res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify(job.profile));
+    res.send(data);
   }
 
   /**
@@ -126,7 +151,14 @@ export class DebugController {
     @Res() res: Response
   ) {
     this.validateToken(token);
-    const profile = await this.collectProfile(Math.min(parseInt(seconds, 10) || 30, 60));
+    const secs = Math.min(parseInt(seconds, 10) || 30, 60);
+    const locked = await this.redis.set(LOCK_KEY, '1', 'EX', secs + 60, 'NX');
+    if (!locked) {
+      throw new ConflictException('Profile already running');
+    }
+    const profile = await this.collectProfile(secs).finally(async () => {
+      await this.redis.del(LOCK_KEY);
+    });
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="cpu-${Date.now()}.cpuprofile"`);
     res.send(JSON.stringify(profile));
@@ -395,10 +427,7 @@ function v8ToD3(profile) {
     return { name: label, value: selfVal + childVal, children: children.length ? children : undefined };
   }
 
-  var childIds = new Set(profile.nodes.reduce(function(acc, n) {
-    return acc.concat(n.children || []);
-  }, []));
-  var root = profile.nodes.find(function(n) { return !childIds.has(n.id); });
+  var root = profile.nodes.find(function(n) { return n.id === 1; });
   if (!root) return { name: '(root)', value: 1 };
   var tree = convert(root.id);
   return tree && tree.value > 0 ? tree : { name: '(root)', value: 1 };
@@ -513,6 +542,7 @@ window.addEventListener('resize', function() {
   if (!chart) return;
   var w = Math.max(document.getElementById('fg-container').clientWidth - 32, 400);
   chart.width(w);
+  d3.select('#flamegraph').call(chart);
 });
 </script>
 </body>
