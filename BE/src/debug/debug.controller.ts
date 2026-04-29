@@ -187,6 +187,7 @@ export class DebugController {
     session.connect();
     try {
       await session.post('Profiler.enable');
+      await session.post('Profiler.setSamplingInterval', { interval: 10000 });
       await session.post('Profiler.start');
       await new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000));
       const { profile } = await session.post('Profiler.stop');
@@ -350,9 +351,21 @@ async function startProfile() {
 }
 
 function pollStatus(total) {
+  var retries502 = 0;
   pollTimer = setInterval(async () => {
     try {
       const r = await fetch('/api/debug/flamegraph/status?token=' + TOKEN + '&jobId=' + jobId);
+      if (r.status === 502 || r.status === 503) {
+        retries502++;
+        if (retries502 <= 10) {
+          document.getElementById('status-text').textContent = 'Profiling… (서버 응답 대기 중 ' + retries502 + '/10)';
+          return;
+        }
+        clearInterval(pollTimer);
+        showError('서버에 연결할 수 없습니다 (' + r.status + '). 부하가 줄어든 후 재시도하세요.');
+        return;
+      }
+      retries502 = 0;
       const d = await r.json();
       if (!r.ok) {
         clearInterval(pollTimer);
