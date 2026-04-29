@@ -10,7 +10,6 @@ import { UserModel } from '../../user/entities/user.entity';
 
 @Injectable()
 export class QuizSetService {
-
   constructor(
     private readonly quizSetCreateService: QuizSetCreateService,
     private readonly quizSetReadService: QuizSetReadService,

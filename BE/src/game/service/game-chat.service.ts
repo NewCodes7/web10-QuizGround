@@ -171,11 +171,14 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       }, idx * slotOffset);
 
       // OUT: (idx * 5ms + 25ms) 오프셋 후 50ms 간격으로 Stream → 브로드캐스트
-      this.outTimers[i].offsetTimeout = setTimeout(() => {
-        this.outTimers[idx].interval = setInterval(() => {
-          this.broadcastSlot(idx);
-        }, CHAT_BATCH_TIME);
-      }, idx * slotOffset + outDelay);
+      this.outTimers[i].offsetTimeout = setTimeout(
+        () => {
+          this.outTimers[idx].interval = setInterval(() => {
+            this.broadcastSlot(idx);
+          }, CHAT_BATCH_TIME);
+        },
+        idx * slotOffset + outDelay
+      );
     }
 
     this.logger.verbose(
@@ -192,12 +195,22 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
 
   onApplicationShutdown(): void {
     for (let i = 0; i < CHAT_MAX_TIMERS; i++) {
-      if (this.inTimers[i].offsetTimeout) clearTimeout(this.inTimers[i].offsetTimeout);
-      if (this.inTimers[i].interval) clearInterval(this.inTimers[i].interval);
-      if (this.outTimers[i].offsetTimeout) clearTimeout(this.outTimers[i].offsetTimeout);
-      if (this.outTimers[i].interval) clearInterval(this.outTimers[i].interval);
+      if (this.inTimers[i].offsetTimeout) {
+        clearTimeout(this.inTimers[i].offsetTimeout);
+      }
+      if (this.inTimers[i].interval) {
+        clearInterval(this.inTimers[i].interval);
+      }
+      if (this.outTimers[i].offsetTimeout) {
+        clearTimeout(this.outTimers[i].offsetTimeout);
+      }
+      if (this.outTimers[i].interval) {
+        clearInterval(this.outTimers[i].interval);
+      }
     }
-    if (this.persistTimer) clearInterval(this.persistTimer);
+    if (this.persistTimer) {
+      clearInterval(this.persistTimer);
+    }
     this.logger.verbose('GameChatService shutdown complete');
   }
 
@@ -243,7 +256,10 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
     const queue = this.inputQueue.get(gameId);
     if (!queue) {
       this.logger.warn(`[chatMessage] room ${gameId} not active on this WAS — rejected`);
-      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.UNAUTHORIZED_ROOM_ACCESS);
+      throw new GameWsException(
+        SocketEvents.CHAT_MESSAGE,
+        ExceptionMessage.UNAUTHORIZED_ROOM_ACCESS
+      );
     }
 
     // playerGameId·isAlive를 인메모리에서 조회 (Redis PLAYER hmget 제거)
@@ -305,8 +321,7 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       return; // 재전송할 내용 없음
     }
 
-    const isAliveRequester =
-      (requesterIsAlive ?? SurvivalStatus.ALIVE) === SurvivalStatus.ALIVE;
+    const isAliveRequester = (requesterIsAlive ?? SurvivalStatus.ALIVE) === SurvivalStatus.ALIVE;
     const batchLog = this.batchLogMap.get(gameId) ?? [];
     const missingEntries = batchLog.filter((e) => e.seq > lastSeq);
 
@@ -419,12 +434,16 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
    * (XTRIM을 XRANGE 전에 실행하면 방금 쓴 항목이 트림될 수 있어 trim race 발생)
    */
   private async writeRoom(gameId: string): Promise<void> {
-    if (this.writingRooms.has(gameId)) return;
+    if (this.writingRooms.has(gameId)) {
+      return;
+    }
     this.writingRooms.add(gameId);
 
     try {
       const localQueue = this.inputQueue.get(gameId);
-      if (!localQueue || localQueue.length === 0) return;
+      if (!localQueue || localQueue.length === 0) {
+        return;
+      }
 
       const batch = localQueue.splice(0, localQueue.length);
 
@@ -439,13 +458,20 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       for (const msg of batch) {
         (pipeline as any).xadd(
           REDIS_KEY.ROOM_CHAT_STREAM(gameId),
-          'MAXLEN', '~', CHAT_STREAM_MAXLEN,
+          'MAXLEN',
+          '~',
+          CHAT_STREAM_MAXLEN,
           '*',
-          'playerId', msg.playerId,
-          'playerName', msg.playerName,
-          'message', msg.message,
-          'timestamp', msg.timestamp.toString(),
-          'isAlive', msg.isAlive
+          'playerId',
+          msg.playerId,
+          'playerName',
+          msg.playerName,
+          'message',
+          msg.message,
+          'timestamp',
+          msg.timestamp.toString(),
+          'isAlive',
+          msg.isAlive
         );
       }
       await pipeline.exec();
@@ -470,7 +496,9 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
    * seq는 alive 메시지가 있을 때만 INCR한다 (dead 전용 배치의 seq 갭 방지).
    */
   private async broadcastRoom(gameId: string): Promise<void> {
-    if (this.broadcastingRooms.has(gameId)) return;
+    if (this.broadcastingRooms.has(gameId)) {
+      return;
+    }
     this.broadcastingRooms.add(gameId);
 
     const start_ts = Date.now();
@@ -478,13 +506,14 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
     try {
       const lastStreamId = this.lastStreamIdMap.get(gameId) ?? '0-0';
       const start = lastStreamId === '0-0' ? '-' : `(${lastStreamId}`;
-      const entries = (await this.redis.xrange(
-        REDIS_KEY.ROOM_CHAT_STREAM(gameId),
-        start,
-        '+'
-      )) as [string, string[]][];
+      const entries = (await this.redis.xrange(REDIS_KEY.ROOM_CHAT_STREAM(gameId), start, '+')) as [
+        string,
+        string[]
+      ][];
 
-      if (entries.length === 0) return;
+      if (entries.length === 0) {
+        return;
+      }
 
       const parsed = this._parseStreamEntries(entries);
       this.lastStreamIdMap.set(gameId, entries[entries.length - 1][0]);
@@ -514,7 +543,11 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
           if (batchLog.length >= CHAT_BATCH_HISTORY_SIZE) {
             batchLog.shift(); // 맨 앞 1개만 제거 — splice(0,n) 전체 시프트 대신 O(1)
           }
-          batchLog.push({ seq, messages: aliveMessages, isAliveFlags: aliveMessages.map(() => true) });
+          batchLog.push({
+            seq,
+            messages: aliveMessages,
+            isAliveFlags: aliveMessages.map(() => true)
+          });
         }
 
         this.server.to(gameId).emit(SocketEvents.CHAT_MESSAGE, { seq, messages: aliveMessages });
@@ -604,7 +637,9 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       'NX'
     );
     if (!acquired) {
-      this.logger.debug(`[persistRoom] lock not acquired — gameId=${gameId} (another WAS holds it)`);
+      this.logger.debug(
+        `[persistRoom] lock not acquired — gameId=${gameId} (another WAS holds it)`
+      );
       return;
     }
 
@@ -613,11 +648,10 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
       // XRANGE exclusive 범위 `(id`는 Redis 6.2+ 필요 (flushRoom Phase 2와 동일).
       // cursor가 없으면 스트림 처음부터(-), 있으면 해당 ID 이후(배타적)만 읽기.
       const start = cursor ? `(${cursor}` : '-';
-      const entries = (await this.redis.xrange(
-        REDIS_KEY.ROOM_CHAT_STREAM(gameId),
-        start,
-        '+'
-      )) as [string, string[]][];
+      const entries = (await this.redis.xrange(REDIS_KEY.ROOM_CHAT_STREAM(gameId), start, '+')) as [
+        string,
+        string[]
+      ][];
 
       if (entries.length === 0) {
         this.logger.debug(`[persistRoom] nothing to persist — gameId=${gameId}`);
@@ -636,7 +670,13 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
 
       // orIgnore(): stream_entry_id unique 위반 시 해당 행을 건너뜀 (INSERT IGNORE).
       // cursor 갱신 실패로 다음 주기에 재시도하더라도 이미 저장된 항목은 중복 삽입되지 않는다.
-      await this.chatMessageRepository.createQueryBuilder().insert().into(ChatMessageModel).values(rows).orIgnore().execute();
+      await this.chatMessageRepository
+        .createQueryBuilder()
+        .insert()
+        .into(ChatMessageModel)
+        .values(rows)
+        .orIgnore()
+        .execute();
 
       // 마지막으로 저장한 stream ID를 커서로 갱신
       const newCursor = entries[entries.length - 1][0];

@@ -21,7 +21,10 @@ describe('pub/sub 브로드캐스트 통합테스트', () => {
   // 이벤트 수신 대기 헬퍼 (지정 시간 내 미수신 시 reject)
   const waitForEvent = <T>(socket: any, event: string, timeoutMs = 2000): Promise<T> =>
     new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`'${event}' 이벤트 수신 타임아웃`)), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error(`'${event}' 이벤트 수신 타임아웃`)),
+        timeoutMs
+      );
       socket.once(event, (data: T) => {
         clearTimeout(timer);
         resolve(data);
@@ -51,7 +54,9 @@ describe('pub/sub 브로드캐스트 통합테스트', () => {
   });
 
   afterAll(async () => {
-    if (app) await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   // ────────────────────────────────────────────────────────────

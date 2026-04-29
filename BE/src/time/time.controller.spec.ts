@@ -6,7 +6,7 @@ describe('TimeController', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [TimeController],
+      controllers: [TimeController]
     }).compile();
 
     controller = module.get<TimeController>(TimeController);
@@ -19,5 +19,5 @@ describe('TimeController', () => {
   it('서버 시각 반환 성공 테스트', async () => {
     const result = await controller.getTime();
     expect(result).toHaveProperty('serverTime');
-  })
+  });
 });

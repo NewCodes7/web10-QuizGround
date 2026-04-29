@@ -23,7 +23,13 @@ import { PositionBroadcastService } from './service/position-broadcast.service';
 import { ChatMessageModel } from './entities/chat-message.entity';
 
 @Module({
-  imports: [RedisModule, QuizSetModule, JwtModule, AuthModule, TypeOrmModule.forFeature([ChatMessageModel])],
+  imports: [
+    RedisModule,
+    QuizSetModule,
+    JwtModule,
+    AuthModule,
+    TypeOrmModule.forFeature([ChatMessageModel])
+  ],
   providers: [
     GameGateway,
     GameSessionService,

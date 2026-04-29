@@ -12,7 +12,7 @@ describe('WaitingRoomService', () => {
     redisMock = {
       keys: jest.fn(),
       hgetall: jest.fn(),
-      scard: jest.fn(),
+      scard: jest.fn()
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -20,9 +20,9 @@ describe('WaitingRoomService', () => {
         WaitingRoomService,
         {
           provide: REDIS_MODULE_CONNECTION_TOKEN,
-          useValue: redisMock,
-        },
-      ],
+          useValue: redisMock
+        }
+      ]
     }).compile();
 
     service = module.get<WaitingRoomService>(WaitingRoomService);
@@ -63,9 +63,15 @@ describe('WaitingRoomService', () => {
 
       redisMock.keys.mockResolvedValue(mockRoomKeys);
       redisMock.hgetall.mockImplementation(async (key) => {
-        if (key === 'Room:123') return mockRoom1;
-        if (key === 'Room:456') return mockRoom2;
-        if (key === 'Room:789') return mockRoom3;
+        if (key === 'Room:123') {
+          return mockRoom1;
+        }
+        if (key === 'Room:456') {
+          return mockRoom2;
+        }
+        if (key === 'Room:789') {
+          return mockRoom3;
+        }
         return null;
       });
       redisMock.scard.mockResolvedValue(2);

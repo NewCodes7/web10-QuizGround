@@ -59,13 +59,17 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
 
     // 플레이어 답안 처리: 200 순차 hgetall → pipeline 1회로 단축
     const readPipeline = this.redis.pipeline();
-    clients.forEach((clientId) => readPipeline.hmget(REDIS_KEY.PLAYER(clientId), 'positionX', 'positionY', 'isAlive'));
+    clients.forEach((clientId) =>
+      readPipeline.hmget(REDIS_KEY.PLAYER(clientId), 'positionX', 'positionY', 'isAlive')
+    );
     const playerResults = await readPipeline.exec();
 
     const writePipeline = this.redis.pipeline();
     clients.forEach((clientId, i) => {
       const [, fields] = playerResults[i] as [Error | null, [string, string, string] | null];
-      if (!fields || fields[2] === '0') return;
+      if (!fields || fields[2] === '0') {
+        return;
+      }
 
       const selectAnswer = this.calculateAnswer(fields[0], fields[1], parseInt(quiz.choiceCount));
       if (selectAnswer.toString() === quiz.answer) {
@@ -128,10 +132,15 @@ export class QuizStateMachineSubscriber extends RedisSubscriber {
     const aliveCount = players.length - deadCount;
 
     // 게임 끝을 알림
-    if (this.hasNoMoreQuiz(quizList, newQuizNum) || this.checkSurvivalEnd(players.length, aliveCount)) {
+    if (
+      this.hasNoMoreQuiz(quizList, newQuizNum) ||
+      this.checkSurvivalEnd(players.length, aliveCount)
+    ) {
       // 모든 플레이어를 생존자로 변경: Promise.all × 200 → pipeline 1회
       const resetPipeline = this.redis.pipeline();
-      players.forEach((id) => resetPipeline.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE }));
+      players.forEach((id) =>
+        resetPipeline.hset(REDIS_KEY.PLAYER(id), { isAlive: SurvivalStatus.ALIVE })
+      );
       await resetPipeline.exec();
 
       const leaderboard = await this.redis.zrange(

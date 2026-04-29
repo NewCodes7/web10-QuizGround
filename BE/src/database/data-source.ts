@@ -16,7 +16,14 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWD || 'test',
   database: process.env.DB_NAME || 'test_db',
-  entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel, ChatMessageModel],
+  entities: [
+    QuizSetModel,
+    QuizModel,
+    QuizChoiceModel,
+    UserModel,
+    UserQuizArchiveModel,
+    ChatMessageModel
+  ],
   migrations: ['src/database/migrations/*.ts'],
-  migrationsTableName: 'typeorm_migrations',
+  migrationsTableName: 'typeorm_migrations'
 });

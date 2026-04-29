@@ -82,7 +82,12 @@ export class GameRoomService {
       client.join(gameId);
       this.positionBroadcastService.onRoomJoined(gameId);
       this.gameChatService.onRoomJoined(gameId);
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, playerData.playerName ?? '');
+      this.positionBroadcastService.onPlayerJoined(
+        gameId,
+        clientId,
+        client.id,
+        playerData.playerName ?? ''
+      );
 
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
@@ -129,14 +134,22 @@ export class GameRoomService {
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
 
       // fire-and-forget — 메트릭 실패가 게임 로직에 영향 주지 않도록
-      this.redis.scard(REDIS_KEY.ROOM_PLAYERS(gameId))
-        .then(count => this.metricService.setRoomPlayerCount(gameId, count))
+      this.redis
+        .scard(REDIS_KEY.ROOM_PLAYERS(gameId))
+        .then((count) => this.metricService.setRoomPlayerCount(gameId, count))
         .catch(() => {});
 
       const isHost = (await this.redis.hget(REDIS_KEY.ROOM(gameId), 'host')) === clientId;
       await this.redis.publish(
         `playerState:${gameId}`,
-        JSON.stringify({ type: 'Join', playerId: clientId, playerName: '', positionX, positionY, isHost })
+        JSON.stringify({
+          type: 'Join',
+          playerId: clientId,
+          playerName: '',
+          positionX,
+          positionY,
+          isHost
+        })
       );
 
       this.logger.verbose(`게임 방 입장 완료: ${gameId} - ${clientId}`);

@@ -13,7 +13,7 @@ export class WaitingRoomService {
     const rooms: RoomDto[] = [];
 
     const roomKeys = await this.redis.keys('Room:*');
-    const gameRoomKeys = roomKeys.filter(key => {
+    const gameRoomKeys = roomKeys.filter((key) => {
       const parts = key.split(':');
       return parts.length === 2 && parts[0] === 'Room';
     });
@@ -29,8 +29,9 @@ export class WaitingRoomService {
     let startIndex = 0;
     if (cursor) {
       const cursorGameId = cursor;
-      startIndex = gameRoomKeys.findIndex(key => key === `Room:${cursorGameId}`) + 1;
-      if (startIndex === 0) { // cursor를 찾지 못한 경우
+      startIndex = gameRoomKeys.findIndex((key) => key === `Room:${cursorGameId}`) + 1;
+      if (startIndex === 0) {
+        // cursor를 찾지 못한 경우
         return new RoomListResponseDto([], null, false);
       }
     }
@@ -61,7 +62,9 @@ export class WaitingRoomService {
     const responseRooms = hasNextPage ? rooms.slice(0, take) : rooms;
     const nextCursor = hasNextPage ? responseRooms[responseRooms.length - 1].gameId : null;
 
-    this.logger.verbose(`방 목록 조회: cursor=${cursor}, take=${take}, rooms=${rooms.length}, nextCursor=${nextCursor}`);
+    this.logger.verbose(
+      `방 목록 조회: cursor=${cursor}, take=${take}, rooms=${rooms.length}, nextCursor=${nextCursor}`
+    );
 
     return new RoomListResponseDto(responseRooms, nextCursor, hasNextPage);
   }

@@ -10,7 +10,7 @@ export class MetricService {
     IS_COLLECTING: 'metrics:isCollecting',
     COLLECTED_METRICS: 'metrics:collected',
     SYSTEM_SNAPSHOTS: 'metrics:system:snapshots',
-    START_SYSTEM_METRICS: 'metrics:system:start',
+    START_SYSTEM_METRICS: 'metrics:system:start'
   };
 
   private readonly requestCounter: promClient.Counter;
@@ -121,20 +121,17 @@ export class MetricService {
     await this.redis.del(this.REDIS_KEYS.SYSTEM_SNAPSHOTS);
 
     const startMetrics = await this.getSystemMetrics();
-    await this.redis.set(
-      this.REDIS_KEYS.START_SYSTEM_METRICS,
-      JSON.stringify(startMetrics)
-    );
+    await this.redis.set(this.REDIS_KEYS.START_SYSTEM_METRICS, JSON.stringify(startMetrics));
   }
 
   async stopCollecting(): Promise<any> {
     await this.redis.set(this.REDIS_KEYS.IS_COLLECTING, '0');
 
     const collectedMetricsStr = await this.redis.lrange(this.REDIS_KEYS.COLLECTED_METRICS, 0, -1);
-    const collectedMetrics = collectedMetricsStr.map(str => JSON.parse(str));
+    const collectedMetrics = collectedMetricsStr.map((str) => JSON.parse(str));
 
     const systemSnapshotsStr = await this.redis.lrange(this.REDIS_KEYS.SYSTEM_SNAPSHOTS, 0, -1);
-    const systemSnapshots = systemSnapshotsStr.map(str => JSON.parse(str));
+    const systemSnapshots = systemSnapshotsStr.map((str) => JSON.parse(str));
 
     const startSystemMetricsStr = await this.redis.get(this.REDIS_KEYS.START_SYSTEM_METRICS);
     const startSystemMetrics = startSystemMetricsStr ? JSON.parse(startSystemMetricsStr) : null;
@@ -178,29 +175,26 @@ export class MetricService {
         executionTime: duration,
         timestamp: Date.now()
       };
-      await this.redis.rpush(
-        this.REDIS_KEYS.COLLECTED_METRICS,
-        JSON.stringify(metric)
-      );
+      await this.redis.rpush(this.REDIS_KEYS.COLLECTED_METRICS, JSON.stringify(metric));
     }
   }
 
   private calculateStats(collectedMetrics: MetricSnapshot[]) {
     const operationMetrics = {
-      request: collectedMetrics.filter(m => m.operation === 'request'),
-      response: collectedMetrics.filter(m => m.operation === 'response')
+      request: collectedMetrics.filter((m) => m.operation === 'request'),
+      response: collectedMetrics.filter((m) => m.operation === 'response')
     };
 
     const result = {};
 
     for (const [operation, metrics] of Object.entries(operationMetrics)) {
-      const eventTypes = [...new Set(metrics.map(m => m.eventType))];
-      const allExecutionTimes = metrics.map(m => m.executionTime).sort((a, b) => a - b);
+      const eventTypes = [...new Set(metrics.map((m) => m.eventType))];
+      const allExecutionTimes = metrics.map((m) => m.executionTime).sort((a, b) => a - b);
 
       const eventStats = {};
       for (const eventType of eventTypes) {
-        const eventMetrics = metrics.filter(m => m.eventType === eventType);
-        const executionTimes = eventMetrics.map(m => m.executionTime).sort((a, b) => a - b);
+        const eventMetrics = metrics.filter((m) => m.eventType === eventType);
+        const executionTimes = eventMetrics.map((m) => m.executionTime).sort((a, b) => a - b);
 
         eventStats[eventType] = {
           count: eventMetrics.length,
@@ -234,22 +228,25 @@ export class MetricService {
     return result;
   }
 
-  private calculateSystemStats(startSystemMetrics: SystemMetricSnapshot, systemSnapshots: SystemMetricSnapshot[]) {
+  private calculateSystemStats(
+    startSystemMetrics: SystemMetricSnapshot,
+    systemSnapshots: SystemMetricSnapshot[]
+  ) {
     if (!startSystemMetrics || systemSnapshots.length === 0) {
       return null;
     }
 
     const endMetrics = systemSnapshots[systemSnapshots.length - 1];
 
-    const cpuValues = systemSnapshots.map(m => m.cpu);
-    const memoryValues = systemSnapshots.map(m => m.memory);
+    const cpuValues = systemSnapshots.map((m) => m.cpu);
+    const memoryValues = systemSnapshots.map((m) => m.memory);
 
     return {
       duration: {
         start: new Date(startSystemMetrics.timestamp).toLocaleString('ko-KR'),
         end: new Date(endMetrics.timestamp).toLocaleString('ko-KR'),
         seconds: `${(endMetrics.timestamp - startSystemMetrics.timestamp) / 1000}s`
-      },
+      }
       // cpu: {
       //   start: startSystemMetrics.cpu,
       //   end: endMetrics.cpu,
@@ -269,8 +266,11 @@ export class MetricService {
     };
   }
 
-  private calculateThroughput(collectedMetrics: MetricSnapshot[], operation: 'request' | 'response') {
-    const metrics = collectedMetrics.filter(m => m.operation === operation);
+  private calculateThroughput(
+    collectedMetrics: MetricSnapshot[],
+    operation: 'request' | 'response'
+  ) {
+    const metrics = collectedMetrics.filter((m) => m.operation === operation);
 
     if (metrics.length === 0) {
       return {
@@ -280,12 +280,12 @@ export class MetricService {
       };
     }
 
-    const startTime = Math.min(...metrics.map(m => m.timestamp));
-    const endTime = Math.max(...metrics.map(m => m.timestamp));
+    const startTime = Math.min(...metrics.map((m) => m.timestamp));
+    const endTime = Math.max(...metrics.map((m) => m.timestamp));
     const durationSeconds = Math.max((endTime - startTime) / 1000, 1);
 
     const timeWindows = new Map<number, number>();
-    metrics.forEach(metric => {
+    metrics.forEach((metric) => {
       const windowKey = Math.floor((metric.timestamp - startTime) / 1000);
       timeWindows.set(windowKey, (timeWindows.get(windowKey) || 0) + 1);
     });
@@ -301,13 +301,17 @@ export class MetricService {
   }
 
   private calculatePercentile(sortedValues: number[], percentile: number): number {
-    if (sortedValues.length === 0) return 0;
+    if (sortedValues.length === 0) {
+      return 0;
+    }
     const index = Math.ceil((percentile / 100) * sortedValues.length) - 1;
     return sortedValues[index];
   }
 
   private calculateAverage(values: number[]): number {
-    if (values.length === 0) return 0;
+    if (values.length === 0) {
+      return 0;
+    }
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 }

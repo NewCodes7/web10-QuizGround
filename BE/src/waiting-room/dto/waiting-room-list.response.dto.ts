@@ -8,7 +8,14 @@ export class RoomDto {
   quizSetTitle: string;
   gameId: string;
 
-  constructor (title: string, gameMode: string, maxPlayerCount: number, currentPlayerCount: number, quizSetTitle: string, gameId: string) {
+  constructor(
+    title: string,
+    gameMode: string,
+    maxPlayerCount: number,
+    currentPlayerCount: number,
+    quizSetTitle: string,
+    gameId: string
+  ) {
     this.title = title;
     this.gameMode = gameMode;
     this.maxPlayerCount = maxPlayerCount;
@@ -22,7 +29,7 @@ export class RoomListResponseDto {
   roomList: RoomDto[];
   paging: PagingDto;
 
-  constructor (roomList: RoomDto[], nextCursor: string, hasNextPage: boolean) {
+  constructor(roomList: RoomDto[], nextCursor: string, hasNextPage: boolean) {
     this.roomList = roomList;
     this.paging = {
       nextCursor,

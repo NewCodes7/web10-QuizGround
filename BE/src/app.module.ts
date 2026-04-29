@@ -41,12 +41,19 @@ import { DebugModule } from './debug/debug.module';
       username: process.env.DB_USER || 'root',
       password: process.env.DB_PASSWD || 'test',
       database: process.env.DB_NAME || 'test_db',
-      entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel, ChatMessageModel],
+      entities: [
+        QuizSetModel,
+        QuizModel,
+        QuizChoiceModel,
+        UserModel,
+        UserQuizArchiveModel,
+        ChatMessageModel
+      ],
       synchronize: process.env.DEV ? true : false, // 개발 모드에서만 활성화
       migrations: [join(__dirname, 'database', 'migrations', '*.js')],
       migrationsRun: !process.env.DEV,
       migrationsTableName: 'typeorm_migrations',
-      logging: process.env.DEV ? true : ['error', 'warn', 'migration'],
+      logging: process.env.DEV ? true : ['error', 'warn', 'migration']
       // extra: {
       //   // 글로벌 batch size 설정
       //   maxBatchSize: 100
@@ -63,7 +70,7 @@ import { DebugModule } from './debug/debug.module';
     TimeModule,
     AuthModule,
     MetricModule,
-    DebugModule,
+    DebugModule
   ],
   controllers: [AppController, TimeController],
   providers: [

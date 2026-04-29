@@ -73,7 +73,9 @@ describe('Position broadcast 통합테스트 (TICKET-009)', () => {
   });
 
   afterAll(async () => {
-    if (app) await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   // ── TICKET-003: 배치 브로드캐스트 ──────────────────────────────────────────

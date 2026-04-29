@@ -41,9 +41,7 @@ export class GameSessionService {
       // 보내면 joinRoom 완료 이전에 도달할 수 있다. 인증 실패 시 handleConnection이
       // disconnect를 호출하므로 null 상태는 join 진행 중인 정상 클라이언트에 한정된다.
       // 첫 몇 개 업데이트를 드랍해도 클라이언트는 계속 전송하므로 무해하다.
-      this.logger.debug(
-        `[updatePosition] drop (joining) — playerId=${clientId} gameId=${gameId}`
-      );
+      this.logger.debug(`[updatePosition] drop (joining) — playerId=${clientId} gameId=${gameId}`);
       return;
     }
 

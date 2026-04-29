@@ -22,6 +22,6 @@ export class CreateChatMessageTable1745500000000 implements MigrationInterface {
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE IF EXISTS \`chat_message\``);
+    await queryRunner.query('DROP TABLE IF EXISTS `chat_message`');
   }
 }

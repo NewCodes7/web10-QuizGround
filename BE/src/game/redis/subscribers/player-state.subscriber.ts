@@ -17,7 +17,9 @@ export class PlayerStateSubscriber extends RedisSubscriber {
 
     subscriber.on('pmessage', async (_pattern, channel, message) => {
       const gameId = channel.split(':')[1];
-      if (!gameId) return;
+      if (!gameId) {
+        return;
+      }
 
       let payload: { type: string; [key: string]: unknown };
       try {

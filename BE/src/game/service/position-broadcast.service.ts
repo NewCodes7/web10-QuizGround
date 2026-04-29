@@ -246,12 +246,15 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
         this.inTimers[idx].interval = setInterval(() => this.writeSlot(idx), POSITION_BATCH_TIME);
       }, idx * slotOffset);
       // OUT timer: drain pendingBroadcasts → socket.io emit (half-period after IN)
-      this.outTimers[idx].offsetTimeout = setTimeout(() => {
-        this.outTimers[idx].interval = setInterval(
-          () => this.broadcastSlot(idx),
-          POSITION_BATCH_TIME
-        );
-      }, idx * slotOffset + outDelay);
+      this.outTimers[idx].offsetTimeout = setTimeout(
+        () => {
+          this.outTimers[idx].interval = setInterval(
+            () => this.broadcastSlot(idx),
+            POSITION_BATCH_TIME
+          );
+        },
+        idx * slotOffset + outDelay
+      );
     }
     this.logger.verbose(
       `Position timer slots started: ${POSITION_MAX_TIMERS} IN+OUT slots × ${POSITION_BATCH_TIME}ms, ${slotOffset}ms offset, ${outDelay}ms IN→OUT gap`
@@ -260,12 +263,20 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
   onApplicationShutdown(): void {
     for (const slot of this.inTimers) {
-      if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
-      if (slot.interval) clearInterval(slot.interval);
+      if (slot.offsetTimeout) {
+        clearTimeout(slot.offsetTimeout);
+      }
+      if (slot.interval) {
+        clearInterval(slot.interval);
+      }
     }
     for (const slot of this.outTimers) {
-      if (slot.offsetTimeout) clearTimeout(slot.offsetTimeout);
-      if (slot.interval) clearInterval(slot.interval);
+      if (slot.offsetTimeout) {
+        clearTimeout(slot.offsetTimeout);
+      }
+      if (slot.interval) {
+        clearInterval(slot.interval);
+      }
     }
     if (this.positionSubscriber) {
       this.positionSubscriber.disconnect();
@@ -353,7 +364,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    */
   enqueueUpdate(gameId: string, message: PositionMessage): void {
     const queue = this.inputQueue.get(gameId);
-    if (!queue) return; // room not active on this server
+    if (!queue) {
+      return;
+    } // room not active on this server
     queue.set(message.playerId, message);
   }
 
@@ -380,7 +393,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    */
   getPlayerState(playerId: string): { gameId: string; isAlive: string } | null {
     const gameId = this.playerGameMap.get(playerId);
-    if (!gameId) return null;
+    if (!gameId) {
+      return null;
+    }
     const isAlive = this.deadPlayerIds.get(gameId)?.has(playerId) ? '0' : '1';
     return { gameId, isAlive };
   }
@@ -403,7 +418,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    *   - Otherwise (log too old) → fall back to current Redis snapshot.
    *   - `isFallback: true` in the response indicates the snapshot path was taken.
    */
-  async handleRetransmit(dto: RetransmitPositionDto, playerId: string, socket: Socket): Promise<void> {
+  async handleRetransmit(
+    dto: RetransmitPositionDto,
+    playerId: string,
+    socket: Socket
+  ): Promise<void> {
     const { gameId, lastSeq } = dto;
 
     // TICKET-001, 004, 006: 세 Redis 호출은 서로 독립적이므로 병렬로 실행한다.
@@ -456,7 +475,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       );
 
       const playerIds = await this.redis.smembers(REDIS_KEY.ROOM_PLAYERS(gameId));
-      if (playerIds.length === 0) return;
+      if (playerIds.length === 0) {
+        return;
+      }
 
       const pipeline = this.redis.pipeline();
       playerIds.forEach((id) =>
@@ -465,7 +486,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       type PosResult = [Error | null, [string, string, string] | null];
       const results = (await pipeline.exec()) as PosResult[];
       results.forEach(([err, data], index) => {
-        if (err || !data) return;
+        if (err || !data) {
+          return;
+        }
         playerPositions.set(playerIds[index], {
           positionX: parseFloat(data[0] ?? '0'),
           positionY: parseFloat(data[1] ?? '0'),
@@ -576,7 +599,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    */
   private async writeRoom(gameId: string): Promise<void> {
     const localQueue = this.inputQueue.get(gameId);
-    if (!localQueue || localQueue.size === 0) return;
+    if (!localQueue || localQueue.size === 0) {
+      return;
+    }
 
     const writeStart = Date.now();
     const batch = Array.from(localQueue.values());
@@ -610,7 +635,10 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const deadMessages: PositionMessage[] = [];
     for (const msg of batch) {
       if (msg.isAlive === SurvivalStatus.ALIVE) {
-        aliveUpdates.push({ playerId: msg.playerId, playerPosition: [msg.positionX, msg.positionY] });
+        aliveUpdates.push({
+          playerId: msg.playerId,
+          playerPosition: [msg.positionX, msg.positionY]
+        });
       } else {
         deadMessages.push(msg);
       }
@@ -646,10 +674,14 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    */
   private broadcastRoom(gameId: string): void {
     const pending = this.pendingBroadcasts.get(gameId);
-    if (!pending || pending.length === 0) return;
+    if (!pending || pending.length === 0) {
+      return;
+    }
 
     const batches = pending.splice(0); // drain atomically
-    if (!this.server) return;
+    if (!this.server) {
+      return;
+    }
 
     const { seq, aliveUpdates, deadMessages } = this.mergeBatches(batches);
     const broadcastStart = Date.now();
@@ -692,8 +724,12 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const aliveMap = new Map<string, PositionUpdate>();
     const deadMap = new Map<string, PositionMessage>();
     for (const batch of batches) {
-      for (const u of batch.aliveUpdates) aliveMap.set(u.playerId, u);
-      for (const m of batch.deadMessages) deadMap.set(m.playerId, m);
+      for (const u of batch.aliveUpdates) {
+        aliveMap.set(u.playerId, u);
+      }
+      for (const m of batch.deadMessages) {
+        deadMap.set(m.playerId, m);
+      }
     }
     return { seq, aliveUpdates: [...aliveMap.values()], deadMessages: [...deadMap.values()] };
   }
@@ -803,9 +839,11 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
 
     await Promise.all([
       this.redis.publish(REDIS_KEY.POSITION_CHANNEL(gameId), pubPayload),
-      this.redis.rpush(REDIS_KEY.ROOM_POSITION_LOG(gameId), logEntry).then(() =>
-        this.redis.ltrim(REDIS_KEY.ROOM_POSITION_LOG(gameId), -POSITION_HISTORY_SIZE, -1)
-      )
+      this.redis
+        .rpush(REDIS_KEY.ROOM_POSITION_LOG(gameId), logEntry)
+        .then(() =>
+          this.redis.ltrim(REDIS_KEY.ROOM_POSITION_LOG(gameId), -POSITION_HISTORY_SIZE, -1)
+        )
     ]);
 
     return seq;
@@ -837,13 +875,19 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const { serverId, gameId, seq, updates } = parsed;
 
     // Self-published — already handled by the local OUT timer
-    if (serverId === this.serverId) return;
+    if (serverId === this.serverId) {
+      return;
+    }
 
     // No local clients in this room on this WAS — nothing to broadcast
-    if (!this.localClientCounts.has(gameId)) return;
+    if (!this.localClientCounts.has(gameId)) {
+      return;
+    }
 
     // Server may not be initialized yet (rare: message before afterInit)
-    if (!this.server) return;
+    if (!this.server) {
+      return;
+    }
 
     const aliveUpdates: PositionUpdate[] = [];
     const deadMessages: PositionMessage[] = [];
@@ -886,10 +930,14 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     deadMessages: PositionMessage[]
   ): void {
     const deadSet = this.deadPlayerIds.get(gameId);
-    if (!deadSet || deadSet.size === 0) return;
+    if (!deadSet || deadSet.size === 0) {
+      return;
+    }
 
     const playerMap = this.playerSocketMap.get(gameId);
-    if (!playerMap) return;
+    if (!playerMap) {
+      return;
+    }
 
     const updates = deadMessages.map((m) => ({
       playerId: m.playerId,
@@ -899,7 +947,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     const socketIds: string[] = [];
     for (const playerId of deadSet) {
       const socketId = playerMap.get(playerId);
-      if (socketId) socketIds.push(socketId);
+      if (socketId) {
+        socketIds.push(socketId);
+      }
     }
 
     this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates });

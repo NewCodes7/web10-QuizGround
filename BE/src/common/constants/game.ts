@@ -1,9 +1,9 @@
 export enum GameMode {
   RANKING = 'RANKING',
-  SURVIVAL = 'SURVIVAL',
+  SURVIVAL = 'SURVIVAL'
 }
 
 export enum SurvivalStatus {
   ALIVE = '1',
-  DEAD = '0',
+  DEAD = '0'
 }
