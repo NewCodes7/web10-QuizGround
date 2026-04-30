@@ -426,18 +426,19 @@ function v8ToD3(profile) {
 
   function convert(nodeId) {
     var node = nodeMap.get(nodeId);
-    if (!node) return null;
+    if (!node || !node.callFrame) return null;
     var fn   = node.callFrame.functionName || '(anonymous)';
     var url  = node.callFrame.url || '';
     var file = url.split('/').pop() || '';
     var line = node.callFrame.lineNumber || 0;
-    var label = file ? fn + ' (' + file + ':' + line + ')' : fn;
+    var name = file ? fn + ' (' + file + ':' + line + ')' : fn;
 
     var children = (node.children || []).map(convert).filter(Boolean);
-    var childVal = children.reduce(function(s, c) { return s + c.value; }, 0);
     var selfVal  = node.hitCount || 0;
 
-    return { name: label, value: selfVal + childVal, children: children.length ? children : undefined };
+    var result = { name: name, value: selfVal };
+    if (children.length) result.children = children;
+    return result;
   }
 
   var root = profile.nodes.find(function(n) { return n.id === 1; });
@@ -460,8 +461,7 @@ function renderFlamegraph(profile) {
     .cellHeight(18)
     .transitionDuration(400)
     .minFrameSize(5)
-    .sort(true)
-    .title('');
+    .sort(true);
 
   d3.select('#flamegraph').datum(data).call(chart);
 }
