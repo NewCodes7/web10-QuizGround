@@ -444,7 +444,7 @@ function v8ToD3(profile) {
   var root = profile.nodes.find(function(n) { return n.id === 1; });
   if (!root) return { name: '(root)', value: 1 };
   var tree = convert(root.id);
-  return tree && tree.value > 0 ? tree : { name: '(root)', value: 1 };
+  return tree ? tree : { name: '(root)', value: 1 };
 }
 
 // ── Render flamegraph ─────────────────────────────────────────────────────
