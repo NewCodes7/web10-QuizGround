@@ -14,7 +14,8 @@ module.exports = {
       name: 'quiz-ground-was',
       script: 'dist/src/main.js',
       ...(process.env.HEAP_PROF === '1' && {
-        node_args: `--heap-prof --heap-prof-dir=${heapProfDir} --heap-prof-interval=1024`
+        node_args: `--heap-prof --heap-prof-dir=${heapProfDir} --heap-prof-interval=1024`,
+        kill_timeout: 10000
       }),
       env: {
         WAS_PORT: 3000,
