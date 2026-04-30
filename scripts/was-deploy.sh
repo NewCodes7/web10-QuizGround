@@ -43,6 +43,11 @@ mkdir -p "$DEPLOY_DIR/tobe"  # 다음 배포를 위해 재생성
 # ── 5. PM2로 BE 실행 ──────────────────────────────────────────────
 # reload  : 기존 프로세스 있을 때 zero-downtime 재시작
 # start   : 최초 배포 시 fallback
+#
+# 힙 프로파일링 활성화 (부하 테스트 시):
+#   HEAP_PROF=1 bash was-deploy.sh
+#   → 프로파일 파일: ~/heap-profiles/*.heapprofile (SIGTERM 시 생성)
+#   → 수집 후 일반 배포로 재시작: bash was-deploy.sh
 echo "[DEPLOY] PM2 프로세스 시작/재시작 중..."
 cd "$CURRENT_DIR/BE"
 pm2 reload ecosystem.config.js --update-env 2>/dev/null \
