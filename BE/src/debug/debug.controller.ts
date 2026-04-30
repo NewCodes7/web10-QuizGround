@@ -434,17 +434,16 @@ function v8ToD3(profile) {
     var name = file ? fn + ' (' + file + ':' + line + ')' : fn;
 
     var children = (node.children || []).map(convert).filter(Boolean);
+    var childVal = children.reduce(function(s, c) { return s + c.value; }, 0);
     var selfVal  = node.hitCount || 0;
 
-    var result = { name: name, value: selfVal };
-    if (children.length) result.children = children;
-    return result;
+    return { name: name, value: selfVal + childVal, children: children.length ? children : undefined };
   }
 
   var root = profile.nodes.find(function(n) { return n.id === 1; });
   if (!root) return { name: '(root)', value: 1 };
   var tree = convert(root.id);
-  return tree ? tree : { name: '(root)', value: 1 };
+  return tree && tree.value > 0 ? tree : { name: '(root)', value: 1 };
 }
 
 // ── Render flamegraph ─────────────────────────────────────────────────────
@@ -555,7 +554,6 @@ window.addEventListener('resize', function() {
   if (!chart) return;
   var w = Math.max(document.getElementById('fg-container').clientWidth - 32, 400);
   chart.width(w);
-  d3.select('#flamegraph').call(chart);
 });
 </script>
 </body>
