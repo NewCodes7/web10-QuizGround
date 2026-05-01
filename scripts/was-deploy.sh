@@ -1,7 +1,7 @@
 #!/bin/bash
 # WAS 서버(node-1 / node-2) 배포 스크립트
 # - 최초 배포(Node.js/PM2 미설치) & 재배포 모두 처리
-# - pm2 reload로 zero-downtime 재시작
+# - pm2 delete + start로 node_args 등 모든 설정 반영
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,17 +41,12 @@ mv "$TOBE_DIR" "$CURRENT_DIR"
 mkdir -p "$DEPLOY_DIR/tobe"  # 다음 배포를 위해 재생성
 
 # ── 5. PM2로 BE 실행 ──────────────────────────────────────────────
-# reload  : 기존 프로세스 있을 때 zero-downtime 재시작
-# start   : 최초 배포 시 fallback
-#
-# 힙 프로파일링 활성화 (부하 테스트 시):
-#   HEAP_PROF=1 bash was-deploy.sh
-#   → 프로파일 파일: ~/heap-profiles/*.heapprofile (SIGTERM 시 생성)
-#   → 수집 후 일반 배포로 재시작: bash was-deploy.sh
+# node_args(--heap-prof 등) 변경은 reload --update-env로 반영되지 않음
+# → delete + start로 항상 새 설정을 적용
 echo "[DEPLOY] PM2 프로세스 시작/재시작 중..."
 cd "$CURRENT_DIR/BE"
-pm2 reload ecosystem.config.js --update-env 2>/dev/null \
-  || pm2 start ecosystem.config.js
+pm2 delete quiz-ground-was 2>/dev/null || true
+pm2 start ecosystem.config.js
 pm2 save  # 서버 재부팅 후에도 자동 복구
 
 echo ""
