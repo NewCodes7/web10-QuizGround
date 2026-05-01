@@ -1,0 +1,358 @@
+name: Deploy Monitoring Stack
+
+on:
+  push:
+    branches: ["release"]
+    paths:
+      - 'monitoring/**'
+      - 'scripts/monitoring-deploy.sh'
+      - 'scripts/monitoring-node-deploy.sh'
+      - 'scripts/monitoring-promtail-deploy.sh'
+      - '.github/workflows/monitoring.yml'
+  workflow_dispatch:
+
+jobs:
+  # ── node_exporter 설치 (node1, node2 병렬) ──────────────────────────
+  deploy-node-exporter-node1:
+    name: node_exporter on node-1
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-node.tar.gz scripts/monitoring-node-deploy.sh
+
+      - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node1"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: node_exporter 배포 (node-1)
+        run: |
+          ssh node1 "mkdir -p ~/monitoring-tobe"
+          scp monitoring-node.tar.gz node1:~/monitoring-tobe/
+          ssh node1 "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-node.tar.gz
+            chmod +x scripts/monitoring-node-deploy.sh
+            bash scripts/monitoring-node-deploy.sh
+            rm -rf ~/monitoring-tobe
+          "
+
+  deploy-node-exporter-node2:
+    name: node_exporter on node-2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-node.tar.gz scripts/monitoring-node-deploy.sh
+
+      - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node2"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: node_exporter 배포 (node-2)
+        run: |
+          ssh node2 "mkdir -p ~/monitoring-tobe"
+          scp monitoring-node.tar.gz node2:~/monitoring-tobe/
+          ssh node2 "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-node.tar.gz
+            chmod +x scripts/monitoring-node-deploy.sh
+            bash scripts/monitoring-node-deploy.sh
+            rm -rf ~/monitoring-tobe
+          "
+
+  # ── node_exporter 설치 (nginx VM) ───────────────────────────────────
+  deploy-node-exporter-nginx:
+    name: node_exporter on nginx
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-node.tar.gz scripts/monitoring-node-deploy.sh
+
+      - name: SSH 설정
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: node_exporter 배포 (nginx)
+        run: |
+          ssh nginx "mkdir -p ~/monitoring-tobe"
+          scp monitoring-node.tar.gz nginx:~/monitoring-tobe/
+          ssh nginx "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-node.tar.gz
+            chmod +x scripts/monitoring-node-deploy.sh
+            bash scripts/monitoring-node-deploy.sh
+            rm -rf ~/monitoring-tobe
+          "
+
+  # ── node_exporter 설치 (redis VM) ───────────────────────────────────
+  deploy-node-exporter-redis:
+    name: node_exporter on redis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-node.tar.gz scripts/monitoring-node-deploy.sh
+
+      - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host redis"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_REDIS }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: node_exporter 배포 (redis)
+        run: |
+          ssh redis "mkdir -p ~/monitoring-tobe"
+          scp monitoring-node.tar.gz redis:~/monitoring-tobe/
+          ssh redis "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-node.tar.gz
+            chmod +x scripts/monitoring-node-deploy.sh
+            bash scripts/monitoring-node-deploy.sh
+            rm -rf ~/monitoring-tobe
+          "
+
+  # ── Prometheus + Grafana + 익스포터 (nginx VM) ──────────────────────
+  deploy-monitoring-stack:
+    name: Monitoring Stack on nginx
+    runs-on: ubuntu-latest
+    needs: [deploy-node-exporter-node1, deploy-node-exporter-node2, deploy-node-exporter-nginx, deploy-node-exporter-redis]
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 모니터링 패키지 생성
+        run: |
+          tar -czf monitoring.tar.gz \
+            monitoring/ \
+            scripts/monitoring-deploy.sh
+
+      - name: SSH 설정
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: monitoring.tar.gz 전송
+        run: |
+          ssh nginx "mkdir -p ~/monitoring-tobe"
+          scp monitoring.tar.gz nginx:~/monitoring-tobe/
+
+      - name: 모니터링 스택 배포
+        run: |
+          ssh nginx "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring.tar.gz
+            chmod +x scripts/monitoring-deploy.sh
+            NODE1_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE1 }} \
+            NODE2_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE2 }} \
+            REDIS_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_REDIS }} \
+            GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }} \
+            bash scripts/monitoring-deploy.sh
+            rm -rf ~/monitoring-tobe
+          "
+
+  # ── Promtail 설치 (node1, node2 병렬) ───────────────────────────────
+  deploy-promtail-node1:
+    name: Promtail on node-1
+    runs-on: ubuntu-latest
+    needs: [deploy-monitoring-stack]
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-promtail.tar.gz scripts/monitoring-promtail-deploy.sh
+
+      - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node1"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Promtail 배포 (node-1)
+        run: |
+          ssh node1 "mkdir -p ~/monitoring-tobe"
+          scp monitoring-promtail.tar.gz node1:~/monitoring-tobe/
+          ssh node1 "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-promtail.tar.gz
+            chmod +x scripts/monitoring-promtail-deploy.sh
+            bash scripts/monitoring-promtail-deploy.sh ${{ secrets.GCE_INTERNAL_IP_NGINX }} node1
+            rm -rf ~/monitoring-tobe
+          "
+
+  deploy-promtail-node2:
+    name: Promtail on node-2
+    runs-on: ubuntu-latest
+    needs: [deploy-monitoring-stack]
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: tar -czf monitoring-promtail.tar.gz scripts/monitoring-promtail-deploy.sh
+
+      - name: SSH 설정 (nginx bastion 경유)
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx-bastion"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+            echo ""
+            echo "Host node2"
+            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  ProxyJump nginx-bastion"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Promtail 배포 (node-2)
+        run: |
+          ssh node2 "mkdir -p ~/monitoring-tobe"
+          scp monitoring-promtail.tar.gz node2:~/monitoring-tobe/
+          ssh node2 "
+            set -e
+            cd ~/monitoring-tobe
+            tar -xzf monitoring-promtail.tar.gz
+            chmod +x scripts/monitoring-promtail-deploy.sh
+            bash scripts/monitoring-promtail-deploy.sh ${{ secrets.GCE_INTERNAL_IP_NGINX }} node2
+            rm -rf ~/monitoring-tobe
+          "

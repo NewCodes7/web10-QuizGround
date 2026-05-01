@@ -32,21 +32,28 @@ export class GameSessionService {
 
   async updatePosition(updatePosition: UpdatePositionDto, clientId: string): Promise<void> {
     const { gameId, newPosition } = updatePosition;
-    const playerKey = REDIS_KEY.PLAYER(clientId);
 
-    // 1. gameId + isAlive 한 번에 조회하여 검증
-    const [playerGameId, isAlive] = await this.redis.hmget(playerKey, 'gameId', 'isAlive');
+    // gameId·isAlive를 인메모리에서 조회해 Redis 왕복을 제거 (핫패스 최적화)
+    const playerState = this.positionBroadcastService.getPlayerState(clientId);
+
+    if (!playerState) {
+      // handleConnection이 async이므로 transport 연결 직후 클라이언트가 UPDATE_POSITION을
+      // 보내면 joinRoom 완료 이전에 도달할 수 있다. 인증 실패 시 handleConnection이
+      // disconnect를 호출하므로 null 상태는 join 진행 중인 정상 클라이언트에 한정된다.
+      // 첫 몇 개 업데이트를 드랍해도 클라이언트는 계속 전송하므로 무해하다.
+      this.logger.debug(`[updatePosition] drop (joining) — playerId=${clientId} gameId=${gameId}`);
+      return;
+    }
+
     this.gameValidator.validatePlayerInRoomV2(
       SocketEvents.UPDATE_POSITION,
       gameId,
-      playerGameId?.toString()
+      playerState.gameId
     );
 
-    // 2. 서버 로컬 배치 큐에 적재 (TICKET-003)
-    // Redis 즉시 write/publish 대신 50ms 단위 배치 flush 시 원자적으로 처리된다.
     this.logger.debug(
       `[updatePosition] recv — playerId=${clientId} gameId=${gameId} ` +
-        `x=${newPosition[0]} y=${newPosition[1]} isAlive=${isAlive ?? '1'}`
+        `x=${newPosition[0]} y=${newPosition[1]} isAlive=${playerState.isAlive ?? '1'}`
     );
 
     this.positionBroadcastService.enqueueUpdate(gameId, {
@@ -54,7 +61,7 @@ export class GameSessionService {
       positionX: newPosition[0],
       positionY: newPosition[1],
       gameId,
-      isAlive: isAlive ?? '1'
+      isAlive: playerState.isAlive
     });
   }
 
@@ -144,6 +151,7 @@ export class GameSessionService {
     const gameId = await this.redis.hget(REDIS_KEY.PLAYER(clientId), 'gameId');
 
     await this.redis.hmset(REDIS_KEY.PLAYER(clientId), { playerName });
+    this.positionBroadcastService.updatePlayerName(clientId, playerName);
     await this.redis.publish(
       `playerState:${gameId}`,
       JSON.stringify({ type: 'Name', playerId: clientId, playerName, gameId })

@@ -65,6 +65,29 @@ npm run lint               # eslint
 
 ---
 
+## Infrastructure (Google Cloud)
+
+```
+Internet
+  │
+  ▼
+nginx VM (e2-micro, 1 vCPU / 1 GB RAM)  ← FE static + BE reverse proxy, external IP
+  │  cookie sticky session (upstream)
+  ├──▶ node-1 VM (e2-small, 1 vCPU / 1 GB RAM)  ← NestJS WAS, internal IP only
+  └──▶ node-2 VM (e2-small, 1 vCPU / 1 GB RAM)  ← NestJS WAS, internal IP only
+            │
+     quizground VPC (10.10.0.0/16)
+            ├──▶ redis VM  (e2-micro, 1 vCPU / 1 GB RAM)  :6379
+            └──▶ mysql VM  (e2-small, 1 vCPU / 1 GB RAM)  :3306
+```
+
+- All VMs in the `quizground` VPC; only nginx has an external IP (acts as CI/CD bastion)
+- Cloud NAT for outbound internet on internal VMs
+- Rolling deploy: node-1 → node-2 via PM2 reload (zero-downtime)
+- Sticky session via cookie hash so each player lands on the same WAS; Redis pub/sub handles cross-WAS state sync
+
+---
+
 ## Architecture
 
 ### Distributed WAS
@@ -106,7 +129,7 @@ ActiveRooms                      # set of active game IDs
 | GameGateway | `game/game.gateway.ts` | WebSocket entry, event handlers |
 | GameService | `game/service/game.service.ts` | Core logic, position updates |
 | GameRoomService | `game/service/game.room.service.ts` | Room lifecycle |
-| BatchProcessor | `game/service/batch.processor.ts` | Batches socket events (~16ms) |
+| BatchProcessor | `game/service/position-broadcast.service.ts` | Batches socket events (~100ms, POSITION_BATCH_TIME=50ms IN/OUT 엇갈림) |
 | GameChatService | `game/service/game.chat.service.ts` | Redis pub/sub chat |
 | QuizCacheService | - | In-memory quiz cache |
 | MetricService | `metric/metric.service.ts` | Prometheus metrics |
@@ -146,7 +169,7 @@ FE/src/constants/socketEvents.ts       # event name constants
 ---
 
 ## Notable Patterns
-- **BatchProcessor**: aggregates position updates, fires every ~16ms → p95 latency 7.1s→0.11s
+- **BatchProcessor**: aggregates position updates, fires every ~100ms (POSITION_BATCH_TIME=50ms, IN/OUT 페이즈 엇갈림) → p95 latency 7.1s→0.11s
 - **Mock Socket (FE)**: PIN-based switching in `socket.ts` for offline dev
 - **FTS**: MySQL ngram parser on `quiz_set.title` for Korean search (50% faster than LIKE)
 - **Cookie auth**: playerId stored in secure httpOnly cookie (sameSite=none)

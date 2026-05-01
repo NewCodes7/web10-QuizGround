@@ -6,10 +6,7 @@ export class GameValidationPipe extends ValidationPipe {
     super({
       transform: true,
       exceptionFactory: (errors) => {
-        return new GameWsException(
-          eventName,
-          Object.values(errors[0].constraints)[0]
-        );
+        return new GameWsException(eventName, Object.values(errors[0].constraints)[0]);
       }
     });
   }

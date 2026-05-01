@@ -1,0 +1,454 @@
+{
+  "annotations": { "list": [] },
+  "description": "GC 원인 진단 — Minor vs Major 유형 분류, Young gen 할당 압박, Old gen retention 추적, 게임 이벤트 상관",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "GC 분석 (기존 대시보드)",
+      "tooltip": "",
+      "type": "link",
+      "url": "/grafana/d/quizground-gc"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["quizground", "gc", "diagnosis"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "hide": 0,
+        "includeAll": true,
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "label_values(nodejs_gc_duration_seconds_count{job=~\"node.*-app\"}, instance)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 0,
+        "type": "query",
+        "label": "Instance"
+      }
+    ]
+  },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "QuizGround — GC 원인 진단",
+  "uid": "quizground-gc-diagnosis",
+  "version": 1,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "GC 유형 분류 — Minor(Young gen 압박) vs Major(Old gen 압박)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "GC 소비 시간 중 Scavenge(Young gen 회수) 비율. 90%+ 는 일반적이나 Scavenge 자체 빈도가 문제. 낮을수록 Old gen 압박이 지배적.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 5, "x": 0, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum(rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=\"minor\", instance=~\"$instance\"}[2m])) / sum(rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", instance=~\"$instance\"}[2m]))",
+          "legendFormat": "Minor 비율",
+          "refId": "A"
+        }
+      ],
+      "title": "Minor GC 비율 (Young gen)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "GC 소비 시간 중 Major(Mark-Sweep + Incremental) 비율. 5% 초과 시 Old gen에 객체가 쌓이고 있음 — retention 또는 큰 객체 직접 할당 의심.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.15 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 5, "x": 5, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum(rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=~\"major|incremental\", instance=~\"$instance\"}[2m])) / sum(rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", instance=~\"$instance\"}[2m]))",
+          "legendFormat": "Major 비율",
+          "refId": "A"
+        }
+      ],
+      "title": "Major GC 비율 (Old gen)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "1초당 각 GC 종류에 소비된 시간(ms). Minor가 높아도 짧고 빠름. Major는 낮아도 pause가 길어 이벤트 루프를 더 오래 멈춤.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 14, "x": 10, "y": 1 },
+      "id": 4,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=\"minor\", instance=~\"$instance\"}[30s]) * 1000",
+          "legendFormat": "Minor (Scavenge) ms/s — {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=\"major\", instance=~\"$instance\"}[30s]) * 1000",
+          "legendFormat": "Major (MarkSweep) ms/s — {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=\"incremental\", instance=~\"$instance\"}[30s]) * 1000",
+          "legendFormat": "Incremental ms/s — {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Minor vs Major — 1초당 GC 소비 시간(ms)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 5,
+      "title": "Young Gen 압박 — New Space 할당 속도",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "new_space(Young gen 영역) 사용률 %. 100%에 도달할 때마다 Scavenge 발생. 자주 100%에 닿으면 Young gen이 할당 속도를 감당 못하는 것 — 단수명 객체 대량 생성 신호.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "id": 6,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"new\", instance=~\"$instance\"} / nodejs_heap_space_size_total_bytes{job=~\"node.*-app\", space=\"new\", instance=~\"$instance\"}",
+          "legendFormat": "new_space 사용률 — {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "new_space 사용률 % (Scavenge 트리거 임박도)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Scavenge 발생 빈도와 updatePosition 이벤트 빈도 상관. updatePosition 증가 직후 Scavenge 급증 → position 처리 경로가 Young gen을 채우는 주범.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "Socket events/s" },
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "id": 7,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_count{job=~\"node.*-app\", kind=\"minor\", instance=~\"$instance\"}[30s])",
+          "legendFormat": "Scavenge/s — {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(socket_requests_total{job=~\"node.*-app\", event=\"updatePosition\", instance=~\"$instance\"}[30s])",
+          "legendFormat": "updatePosition/s — {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Scavenge 빈도 vs updatePosition 이벤트 (우측 Y축: 소켓 이벤트)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 8,
+      "title": "Old Gen 보유 — retention 여부",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "old_space 사용량 추세. 부하테스트 내내 단조 증가 → 참조 누수(retention) 의심. 증가 후 Major GC로 회수 반복 → 정상 Major GC 동작. 부하와 무관하게 안정 → Old gen 문제 없음.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "id": 9,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"old\", instance=~\"$instance\"}",
+          "legendFormat": "old_space — {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "old_space 누적 추세 (단조 증가 → retention 의심)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "V8은 일정 크기(기본 ~512KB) 이상 객체를 Large Object Space에 직접 할당 → Old gen으로 바로 올라가 Major GC 대상이 됨. 증가 시 큰 Buffer나 대형 배열 생성 의심.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "id": 10,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"large_object\", instance=~\"$instance\"}",
+          "legendFormat": "large_object_space — {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "large_object_space (큰 Buffer·배열의 Old gen 직접 할당)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 11,
+      "title": "이벤트 루프 영향 — GC Pause ↔ 응답 지연 직접 상관",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Major GC pause rate(ms/s)와 Event Loop Lag P99(ms)를 겹쳐서 봄. Major GC spike와 EL Lag spike가 시간적으로 일치하면 Major GC가 응답 지연의 직접 원인.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2 },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "EL Lag P99 (ms)" },
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 12,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=~\"major|incremental\", instance=~\"$instance\"}[30s]) * 1000",
+          "legendFormat": "Major GC ms/s — {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "nodejs_eventloop_lag_p99_seconds{job=~\"node.*-app\", instance=~\"$instance\"} * 1000",
+          "legendFormat": "EL Lag P99 ms — {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Major GC pause rate vs Event Loop Lag P99 (우측 Y축: Lag)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Scavenge 1회 평균 지속 시간. 1ms 미만 = 정상. 5ms 이상 = Young gen이 너무 커졌거나 과부하 신호.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 28 },
+      "id": 13,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=\"minor\", instance=~\"$instance\"}[5m]) / rate(nodejs_gc_duration_seconds_count{job=~\"node.*-app\", kind=\"minor\", instance=~\"$instance\"}[5m]) * 1000",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Minor GC 1회 평균 pause (ms)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Major GC 1회 평균 지속 시간. 50ms 이상이면 이벤트 루프가 0.05초씩 정지. 200ms 이상이면 심각한 응답 지연 유발.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 28 },
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "rate(nodejs_gc_duration_seconds_sum{job=~\"node.*-app\", kind=~\"major|incremental\", instance=~\"$instance\"}[5m]) / rate(nodejs_gc_duration_seconds_count{job=~\"node.*-app\", kind=~\"major|incremental\", instance=~\"$instance\"}[5m]) * 1000",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Major GC 1회 평균 pause (ms)",
+      "type": "stat"
+    }
+  ]
+}

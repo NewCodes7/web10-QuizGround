@@ -17,7 +17,14 @@ echo "  upstream: $NODE1_INTERNAL_IP:3000, $NODE2_INTERNAL_IP:3000"
 
 # ── 1. nginx 설치 확인 (최초 배포 시) ────────────────────────────
 if ! command -v nginx &>/dev/null; then
-  echo "[SETUP] nginx 설치 중..."
+  echo "[SETUP] nginx 설치 중 (mainline 1.29.6+)..."
+  sudo apt-get update
+  sudo apt-get install -y curl gnupg2 lsb-release
+  curl -fsSL https://nginx.org/keys/nginx_signing.key \
+    | sudo gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+http://nginx.org/packages/mainline/ubuntu $(lsb_release -cs) nginx" \
+    | sudo tee /etc/apt/sources.list.d/nginx.list
   sudo apt-get update
   sudo apt-get install -y nginx
 fi
@@ -25,18 +32,41 @@ fi
 # ── 2. nginx 설정 생성 (항상 갱신 - 내부 IP 변경 반영) ───────────
 # IP가 바뀔 수 있으므로 매 배포마다 설정 파일을 재생성
 echo "[DEPLOY] nginx upstream 설정 업데이트 중..."
-sudo tee /etc/nginx/sites-available/quizground > /dev/null << NGINX_CONF
+sudo tee /etc/nginx/conf.d/quizground.conf > /dev/null << NGINX_CONF
 upstream quizground_backend {
-    # Socket.IO sticky session: 같은 클라이언트는 같은 WAS로 라우팅
-    ip_hash;
+    # Socket.IO sticky session: cookie로 같은 클라이언트를 같은 WAS로 고정
+    sticky cookie quizground_srv expires=1h path=/ httponly samesite=lax;
     server ${NODE1_INTERNAL_IP}:3000;
     server ${NODE2_INTERNAL_IP}:3000;
+}
+
+# nginx_exporter용 stub_status (localhost + Docker bridge에서만 접근 가능)
+server {
+    listen 127.0.0.1:8080;
+    listen 172.17.0.1:8080;
+    server_name _;
+    location /stub_status {
+        stub_status;
+    }
 }
 
 server {
     listen 80;
     root /var/www/html;
     index index.html;
+
+    # Grafana 모니터링 대시보드 프록시 (Docker 컨테이너 localhost:3001)
+    # serve_from_sub_path=true 이므로 trailing slash 없이 /grafana/ 경로 유지
+    location /grafana/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
 
     # FE - React SPA 라우팅
     location / {
@@ -68,12 +98,8 @@ server {
 }
 NGINX_CONF
 
-# sites-enabled 심볼릭 링크 등록 (최초 1회)
-if [ ! -L /etc/nginx/sites-enabled/quizground ]; then
-  echo "[SETUP] nginx sites-enabled 설정 중..."
-  sudo ln -sf /etc/nginx/sites-available/quizground /etc/nginx/sites-enabled/quizground
-  sudo rm -f /etc/nginx/sites-enabled/default
-fi
+# nginx.org mainline 패키지는 conf.d/default.conf를 기본 제공 → 충돌 방지
+sudo rm -f /etc/nginx/conf.d/default.conf
 
 # ── 3. FE 정적 파일 배포 ──────────────────────────────────────────
 echo "[DEPLOY] FE 정적 파일 배포 중..."

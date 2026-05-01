@@ -14,6 +14,7 @@ import { TraceClass } from '../../common/interceptor/SocketEventLoggerIntercepto
 import { SurvivalStatus } from '../../common/constants/game';
 import { PositionBroadcastService } from './position-broadcast.service';
 import { GameChatService } from './game-chat.service';
+import { MetricService } from '../../metric/metric.service';
 
 @TraceClass()
 @Injectable()
@@ -25,7 +26,8 @@ export class GameRoomService {
     @InjectRedis() private readonly redis: Redis,
     private readonly gameValidator: GameValidator,
     private readonly positionBroadcastService: PositionBroadcastService,
-    private readonly gameChatService: GameChatService
+    private readonly gameChatService: GameChatService,
+    private readonly metricService: MetricService
   ) {}
 
   async createRoom(gameConfig: CreateGameDto, clientId: string): Promise<string> {
@@ -80,11 +82,16 @@ export class GameRoomService {
       client.join(gameId);
       this.positionBroadcastService.onRoomJoined(gameId);
       this.gameChatService.onRoomJoined(gameId);
+      this.positionBroadcastService.onPlayerJoined(
+        gameId,
+        clientId,
+        client.id,
+        playerData.playerName ?? ''
+      );
 
       await this.redis.hset(REDIS_KEY.PLAYER(clientId), {
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
 
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
       return;
@@ -106,6 +113,7 @@ export class GameRoomService {
     client.join(gameId); //validation 후에 조인해야함
     this.positionBroadcastService.onRoomJoined(gameId);
     this.gameChatService.onRoomJoined(gameId);
+    this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id, '');
 
     // onRoomJoined 이후 예외가 발생하면 onRoomLeft를 호출해 카운트 불균형을 방지한다.
     try {
@@ -121,21 +129,34 @@ export class GameRoomService {
         isAlive: SurvivalStatus.ALIVE,
         socketId: client.id
       });
-      this.positionBroadcastService.onPlayerJoined(gameId, clientId, client.id);
 
       await this.redis.zadd(REDIS_KEY.ROOM_LEADERBOARD(gameId), 0, clientId);
       await this.redis.sadd(REDIS_KEY.ROOM_PLAYERS(gameId), clientId);
 
+      // fire-and-forget — 메트릭 실패가 게임 로직에 영향 주지 않도록
+      this.redis
+        .scard(REDIS_KEY.ROOM_PLAYERS(gameId))
+        .then((count) => this.metricService.setRoomPlayerCount(gameId, count))
+        .catch(() => {});
+
       const isHost = (await this.redis.hget(REDIS_KEY.ROOM(gameId), 'host')) === clientId;
       await this.redis.publish(
         `playerState:${gameId}`,
-        JSON.stringify({ type: 'Join', playerId: clientId, playerName: '', positionX, positionY, isHost })
+        JSON.stringify({
+          type: 'Join',
+          playerId: clientId,
+          playerName: '',
+          positionX,
+          positionY,
+          isHost
+        })
       );
 
       this.logger.verbose(`게임 방 입장 완료: ${gameId} - ${clientId}`);
       await this.sendCurrentInformation(client, gameId, clientId, currentPlayers);
     } catch (err) {
       this.positionBroadcastService.onRoomLeft(gameId);
+      this.positionBroadcastService.onPlayerLeft(gameId, clientId);
       this.gameChatService.onRoomLeft(gameId);
       throw err;
     }
@@ -278,9 +299,7 @@ export class GameRoomService {
     }
 
     const remainingPlayers = await this.redis.scard(roomPlayersKey);
-
-    // 4. 플레이어 관련 모든 키에 TTL 설정
-    // await this.setTTLForPlayerKeys(clientId);
+    this.metricService.setRoomPlayerCount(roomId, remainingPlayers);
 
     if (remainingPlayers === 0) {
       // 마지막 플레이어가 나간 경우

@@ -15,6 +15,7 @@ import socketEvents from '../../../src/common/constants/socket-events';
 import { REDIS_KEY } from '../../../src/common/constants/redis-key.constant';
 import { SocketTestHelper } from '../setup/socket.helper';
 import { setupTestingModule } from '../setup/game.setup';
+import { PositionBroadcastService } from '../../../src/game/service/position-broadcast.service';
 
 /** updatePosition 이벤트를 보내고 배치 flush를 기다린다 (최대 200ms). */
 function waitForPositionBroadcast(socket: Socket, timeout = 200): Promise<any> {
@@ -46,6 +47,7 @@ describe('Position broadcast 통합테스트 (TICKET-009)', () => {
   let gameId: string;
   let client1Id: string, client2Id: string;
   let client1: Socket, client2: Socket;
+  let positionBroadcastService: PositionBroadcastService;
 
   beforeAll(async () => {
     const setup = await setupTestingModule();
@@ -53,6 +55,7 @@ describe('Position broadcast 통합테스트 (TICKET-009)', () => {
     redisMock = setup.redisMock;
     port = setup.port;
     socketHelper = new SocketTestHelper();
+    positionBroadcastService = setup.moduleRef.get(PositionBroadcastService);
   });
 
   beforeEach(async () => {
@@ -70,7 +73,9 @@ describe('Position broadcast 통합테스트 (TICKET-009)', () => {
   });
 
   afterAll(async () => {
-    if (app) await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   // ── TICKET-003: 배치 브로드캐스트 ──────────────────────────────────────────
@@ -162,8 +167,9 @@ describe('Position broadcast 통합테스트 (TICKET-009)', () => {
 
   describe('alive/dead visibility (TICKET-002)', () => {
     it('alive 요청자는 dead 플레이어 위치를 받지 않는다', async () => {
-      // client2를 dead 처리
+      // client2를 dead 처리 (Redis + in-memory 동기화)
       await redisMock.hset(REDIS_KEY.PLAYER(client2Id), 'isAlive', '0');
+      positionBroadcastService.onPlayerDied(gameId, client2Id);
 
       // client2가 위치 업데이트 enqueue (dead 상태)
       const broadcastPromise = waitForPositionBroadcast(client1);

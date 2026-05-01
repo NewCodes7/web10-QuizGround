@@ -23,6 +23,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
     "socket.io-client": "^4.8.1",
+    "socket.io-msgpack-parser": "^3.0.2",
     "zustand": "^5.0.1"
   },
   "devDependencies": {

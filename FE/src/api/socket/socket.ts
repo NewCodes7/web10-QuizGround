@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import * as msgpackParser from 'socket.io-msgpack-parser';
 import SocketEvents from '@/constants/socketEvents';
 import { SocketDataMap } from './socketEventTypes';
 import mockMap from './mocks/socketMocks';
@@ -49,7 +50,7 @@ class SocketService {
       this.socket = new mockMap[gameId as keyof typeof mockMap]() as SocketInterface;
     } else {
       // 소켓 연결
-      this.socket = io(this.url, { query: header, withCredentials: true }) as SocketInterface;
+      this.socket = io(this.url, { query: header, withCredentials: true, parser: msgpackParser }) as SocketInterface;
     }
     this.initHandler();
     await new Promise<void>((resolve, reject) => {

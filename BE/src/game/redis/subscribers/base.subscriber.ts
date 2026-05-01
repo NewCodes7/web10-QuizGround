@@ -32,20 +32,23 @@ export abstract class RedisSubscriber {
       'WITHSCORES'
     );
 
-    // 4. 플레이어 정보 구성
-    const players = [];
+    // 4. 플레이어 정보 구성: 순차 hget × 200 → pipeline 1회
+    const playerIds: string[] = [];
+    const scores: number[] = [];
     for (let i = 0; i < leaderboard.length; i += 2) {
-      const playerId = leaderboard[i];
-      const score = parseInt(leaderboard[i + 1]);
-      const isAnswer =
-        (await this.redis.hget(REDIS_KEY.PLAYER(playerId), 'isAnswerCorrect')) === '1';
-
-      players.push({
-        playerId,
-        score,
-        isAnswer
-      });
+      playerIds.push(leaderboard[i]);
+      scores.push(parseInt(leaderboard[i + 1]));
     }
+
+    const answerPipeline = this.redis.pipeline();
+    playerIds.forEach((id) => answerPipeline.hget(REDIS_KEY.PLAYER(id), 'isAnswerCorrect'));
+    const answerResults = await answerPipeline.exec();
+
+    const players = playerIds.map((playerId, i) => ({
+      playerId,
+      score: scores[i],
+      isAnswer: (answerResults[i][1] as string) === '1'
+    }));
 
     return {
       quiz: {

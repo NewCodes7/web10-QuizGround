@@ -26,7 +26,10 @@
     "test:integration:watch": "jest --config ./test/jest-integration.json --watch --runInBand --forceExit",
     "test:integration:verbose": "jest --config ./test/jest-integration.json --verbose --runInBand -forceExit",
     "test:integration:coverage": "jest --config ./test/jest-integration.json --coverage --runInBand --forceExit",
-    "test:integration:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./test/jest-integration.json --runInBand"
+    "test:integration:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./test/jest-integration.json --runInBand",
+    "migration:generate": "npx typeorm-ts-node-commonjs migration:generate -d src/database/data-source.ts",
+    "migration:run": "npx typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
+    "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts"
   },
   "dependencies": {
     "@nestjs-modules/ioredis": "^2.0.2",
@@ -55,11 +58,11 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
-    "pinpoint-node-agent": "^0.9.0-next.0",
     "prom-client": "^15.1.3",
     "redis": "^4.7.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
+    "socket.io-msgpack-parser": "^3.0.2",
     "typeorm": "^0.3.20",
     "uuid": "^11.0.3"
   },

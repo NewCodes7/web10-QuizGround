@@ -68,7 +68,9 @@ describe('Game 스코어링 통합테스트', () => {
   });
 
   afterAll(async () => {
-    if (app) await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   /** 호스트 클라이언트로 게임 시작 */

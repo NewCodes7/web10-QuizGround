@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import * as msgpackParser from 'socket.io-msgpack-parser';
 import socketEvents from '../../../src/common/constants/socket-events';
 
 type ConnectClientsResponse = {
@@ -23,6 +24,7 @@ export class SocketTestHelper {
       const createClient = io(`http://localhost:${port}/game`, {
         transports: ['websocket'],
         forceNew: true,
+        parser: msgpackParser,
         query: {
           'create-room': 'title=Test Room;gameMode=RANKING;maxPlayerCount=5;isPublic=true'
         }
@@ -40,6 +42,7 @@ export class SocketTestHelper {
           const client = io(`http://localhost:${port}/game`, {
             transports: ['websocket'],
             forceNew: true,
+            parser: msgpackParser,
             query: {
               'game-id': this.gameId
             }

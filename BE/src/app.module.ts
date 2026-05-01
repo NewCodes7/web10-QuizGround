@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { ClassSerializerInterceptor, Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -22,6 +23,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { InactiveRoomScheduler } from './game/redis/inactive-room.scheduler';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { MetricModule } from './metric/metric.module';
+import { DebugModule } from './debug/debug.module';
 
 @Module({
   imports: [
@@ -39,10 +41,19 @@ import { MetricModule } from './metric/metric.module';
       username: process.env.DB_USER || 'root',
       password: process.env.DB_PASSWD || 'test',
       database: process.env.DB_NAME || 'test_db',
-      entities: [QuizSetModel, QuizModel, QuizChoiceModel, UserModel, UserQuizArchiveModel, ChatMessageModel],
+      entities: [
+        QuizSetModel,
+        QuizModel,
+        QuizChoiceModel,
+        UserModel,
+        UserQuizArchiveModel,
+        ChatMessageModel
+      ],
       synchronize: process.env.DEV ? true : false, // 개발 모드에서만 활성화
-      logging: true, // 모든 쿼리 로깅
-      logger: 'advanced-console'
+      migrations: [join(__dirname, 'database', 'migrations', '*.js')],
+      migrationsRun: !process.env.DEV,
+      migrationsTableName: 'typeorm_migrations',
+      logging: process.env.DEV ? true : ['error', 'warn', 'migration']
       // extra: {
       //   // 글로벌 batch size 설정
       //   maxBatchSize: 100
@@ -58,7 +69,8 @@ import { MetricModule } from './metric/metric.module';
     WaitingRoomModule,
     TimeModule,
     AuthModule,
-    MetricModule
+    MetricModule,
+    DebugModule
   ],
   controllers: [AppController, TimeController],
   providers: [

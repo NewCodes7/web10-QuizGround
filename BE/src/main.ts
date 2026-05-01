@@ -1,11 +1,8 @@
-import 'pinpoint-node-agent';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { GameActivityInterceptor } from './game/middleware/game-activity.interceptor';
 import { KstLogger } from './common/logger/kst.logger';
-
-// env 불러오기
 
 async function bootstrap() {
   const logLevels: Array<'debug' | 'verbose' | 'log' | 'warn' | 'error' | 'fatal'> = process.env
@@ -16,6 +13,7 @@ async function bootstrap() {
     logger: new KstLogger(undefined, { logLevels })
   });
   app.enableCors();
+  app.enableShutdownHooks();
 
   // 전역 인터셉터로 등록
   app.useGlobalInterceptors(app.get(GameActivityInterceptor));

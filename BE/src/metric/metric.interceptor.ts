@@ -8,9 +8,7 @@ import SocketEvents from '../common/constants/socket-events';
 export class MetricInterceptor implements NestInterceptor {
   private readonly eventPatterns = Object.values(SocketEvents);
 
-  constructor(
-    private metricService: MetricService,
-  ) {}
+  constructor(private metricService: MetricService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const startedAt = process.hrtime();

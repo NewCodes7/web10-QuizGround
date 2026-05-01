@@ -6,6 +6,6 @@ import { RedisModule } from '@nestjs-modules/ioredis';
 @Module({
   imports: [RedisModule],
   controllers: [WaitingRoomController],
-  providers: [WaitingRoomService],
+  providers: [WaitingRoomService]
 })
 export class WaitingRoomModule {}

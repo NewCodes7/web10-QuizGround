@@ -10,7 +10,7 @@ export class WaitingRoomController {
   async findAll(
     // 참고: @nestjs/common의 DefaultValuePipe는 빈 문자열이 왔을 때는 대응 못함
     @Query('cursor', new ParseIntOrDefault(0)) cursor: number,
-    @Query('take', new ParseIntOrDefault(10), ParseIntPipe) take: number,
+    @Query('take', new ParseIntOrDefault(10), ParseIntPipe) take: number
   ) {
     return this.waitingRoomService.findAllWaitingRooms(cursor, take);
   }

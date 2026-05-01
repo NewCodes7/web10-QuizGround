@@ -16,7 +16,7 @@ export class CreateGameDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(300)
+  @Max(10000)
   maxPlayerCount: number;
 
   @Transform(({ value }) => {
