@@ -96,7 +96,9 @@ export const GameHeader = React.memo(
             </div>
           </div>
         </div>
-        <QuizSettingModal isOpen={isQuizModalOpen} onClose={() => setIsQuizModalOpen(false)} />
+        {isQuizModalOpen && (
+          <QuizSettingModal isOpen={isQuizModalOpen} onClose={() => setIsQuizModalOpen(false)} />
+        )}
       </div>
     );
   }

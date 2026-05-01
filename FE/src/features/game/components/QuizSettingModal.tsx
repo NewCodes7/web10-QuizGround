@@ -38,7 +38,7 @@ export const QuizSettingModal = ({ isOpen, onClose }: Props) => {
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  });
+  }, [inputValue]);
 
   useSocketEvent('updateRoomQuizset', () => {
     onClose();
