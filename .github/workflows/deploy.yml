@@ -160,7 +160,7 @@ jobs:
             rm be.tar.gz
             echo 'PYROSCOPE_INSTANCE=node1' >> .env
             chmod +x scripts/was-deploy.sh
-            HEAP_PROF=1 bash scripts/was-deploy.sh
+            bash scripts/was-deploy.sh
           "
 
   # ── 3. node-2 배포 (node-1 완료 후 순차 실행 → rolling deploy) ──
@@ -214,7 +214,7 @@ jobs:
             rm be.tar.gz
             echo 'PYROSCOPE_INSTANCE=node2' >> .env
             chmod +x scripts/was-deploy.sh
-            HEAP_PROF=1 bash scripts/was-deploy.sh
+            bash scripts/was-deploy.sh
           "
 
   # ── 4. nginx 배포 (WAS 양쪽 완료 후) ────────────────────────────
