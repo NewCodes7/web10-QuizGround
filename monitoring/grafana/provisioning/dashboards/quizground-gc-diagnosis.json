@@ -217,7 +217,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"new_space\", instance=~\"$instance\"} / nodejs_heap_space_size_total_bytes{job=~\"node.*-app\", space=\"new_space\", instance=~\"$instance\"}",
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"new\", instance=~\"$instance\"} / nodejs_heap_space_size_total_bytes{job=~\"node.*-app\", space=\"new\", instance=~\"$instance\"}",
           "legendFormat": "new_space 사용률 — {{instance}}",
           "refId": "A"
         }
@@ -289,7 +289,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"old_space\", instance=~\"$instance\"}",
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"old\", instance=~\"$instance\"}",
           "legendFormat": "old_space — {{instance}}",
           "refId": "A"
         }
@@ -314,7 +314,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"large_object_space\", instance=~\"$instance\"}",
+          "expr": "nodejs_heap_space_size_used_bytes{job=~\"node.*-app\", space=\"large_object\", instance=~\"$instance\"}",
           "legendFormat": "large_object_space — {{instance}}",
           "refId": "A"
         }
