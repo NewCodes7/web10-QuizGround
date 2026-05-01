@@ -13,6 +13,7 @@ async function bootstrap() {
     logger: new KstLogger(undefined, { logLevels })
   });
   app.enableCors();
+  app.enableShutdownHooks();
 
   // 전역 인터셉터로 등록
   app.useGlobalInterceptors(app.get(GameActivityInterceptor));
