@@ -224,8 +224,101 @@ T=후반 (Old space threshold 도달)
   게임이 진행될수록 Major GC 빈도 증가 → 점점 더 눈에 띄는 랙
 ```
 
-이것이 "초반에는 빠르다가 점점 느려지는" 현상의 정확한 메커니즘이다.  
-GC 로그(`--expose-gc` + `--trace-gc`)로 확인하면 후반부에 `Mark-Sweep` 로그가 증가함을 볼 수 있다.
+이것이 "초반에는 빠르다가 점점 느려지는" 현상의 정확한 메커니즘이다.
+
+---
+
+### 3-1-ter. `--trace-gc` 실측 데이터 — Buffer 가설 직접 확정
+
+부하 테스트 중 `--trace-gc` 로그를 실측한 결과, 가설이 수치로 확정되었다.
+
+#### Scavenge 빈도
+
+1,568ms 구간에서 Scavenge **24회** 발생. 평균 **65ms마다 1회**.
+
+```
+329216ms  Scavenge  task             59.3 → 56.0 MB  1.14ms
+329270ms  Scavenge  task             59.2 → 56.2 MB  1.00ms  ← 54ms 후
+329334ms  Scavenge  task             59.4 → 56.3 MB  0.99ms  ← 64ms 후
+329401ms  Scavenge  allocation fail  60.1 → 56.5 MB  0.95ms  ← 67ms 후
+  ... (allocation failure 폭발 구간)
+330051ms  Scavenge  task             61.6 → 58.0 MB  0.87ms
+330115ms  Scavenge  task             61.2 → 58.1 MB  0.96ms  ← 64ms 후
+  ... 계속
+```
+
+#### `allocation failure` 연쇄 폭발
+
+`task` 트리거는 V8이 스케줄에 따라 Scavenge를 자발적으로 실행한 것이다.  
+`allocation failure`는 new space가 완전히 꽉 차 더 이상 객체를 할당할 수 없어 **강제 발동**된 Scavenge다.
+
+```
+329401ms  allocation failure  60.1 → 56.5 MB  (0.95ms)
+329437ms  allocation failure  60.3 → 56.7 MB  (1.24ms)  ← 36ms 후
+329449ms  allocation failure  60.3 → 56.8 MB  (0.87ms)  ← 12ms 후
+329461ms  allocation failure  60.6 → 56.8 MB  (0.62ms)  ← 12ms 후  ← 연속 폭발
+329472ms  allocation failure  60.6 → 56.8 MB  (0.57ms)  ← 11ms 후
+329484ms  allocation failure  60.6 → 56.8 MB  (0.67ms)  ← 12ms 후
+```
+
+6회가 **83ms 안에 연속 발생**. 각 Scavenge가 ~3.5 MB를 비우는데 12ms 만에 다시 꽉 찬다.
+
+```
+순간 최대 할당 속도 = 3.5 MB / 12ms ≈ 290 MB/s
+```
+
+#### 스모킹 건 — `broadcastRoom 61ms` 경고와 정확히 일치
+
+```
+329461ms  Scavenge  allocation failure  ← GC 폭발 중
+329472ms  Scavenge  allocation failure  ← GC 폭발 중
+329484ms  Scavenge  allocation failure
+329484ms  [WARN] broadcastRoom took 61ms (>40ms threshold)  ← 동시 발생
+```
+
+`broadcastRoom`이 61ms 걸린 것은 코드 자체의 문제가 아니다.  
+**allocation failure Scavenge가 10~12ms 간격으로 6번 이벤트 루프를 끊었기 때문**이다.
+
+#### Mark-Compact (Major GC)
+
+```
+330517ms  Mark-Compact  61.3 → 49.2 MB
+  final pause:          6.95ms
+  incremental marking:  32.9ms / 205 steps / wallclock 97ms / biggest step 4.2ms
+  trigger:              "GC in old space requested"
+```
+
+최종 compact pause는 6.95ms지만, 그 전 **97ms 동안 205번의 incremental marking**이 산발적으로 끼어들었다.  
+old space가 한계에 도달해 V8이 직접 요청한 GC다.
+
+#### mu = 0.994가 CPU 17.1%와 모순처럼 보이는 이유
+
+```
+average mu = 0.994  →  "APP 실행 시간의 99.4% = GC 방해 없이 돌아감"처럼 읽힘
+CPU profile GC  = 17.1%  →  전혀 다른 수치
+```
+
+두 측정값은 다른 것을 재고 있다.
+
+| 지표 | 측정 대상 |
+|---|---|
+| **mu** | V8의 incremental marking 스케줄링 효율. Major GC 작업을 잘게 쪼개서 APP을 얼마나 방해 없이 돌리는지 |
+| **CPU profile 17.1%** | Scavenge 포함, GC 코드가 실제로 CPU를 점유한 총 시간 |
+
+mu가 높다고 GC CPU 비용이 낮은 것이 아니다.  
+Scavenge는 stop-the-world이며 65ms마다 발생한다 — 그 비용은 mu에 잘 반영되지 않는다.
+
+#### 실측 수치 요약
+
+| 항목 | 수치 |
+|---|---|
+| Scavenge 평균 주기 | **65ms** |
+| allocation failure 최대 연속 | **6회 / 83ms** |
+| 순간 최대 할당 속도 | **~290 MB/s** |
+| `broadcastRoom 61ms` 원인 | allocation failure 연쇄와 동일 시점 — **직접 확인** |
+| Mark-Compact final pause | 6.95ms + incremental 97ms |
+
+Buffer 가설은 `--trace-gc` 실측 데이터로 **직접 확정**되었다.
 
 ---
 
@@ -361,7 +454,59 @@ import { encode, decode } from '@socket.io/msgpack-parser';
 const socket = io(url, { parser: { encode, decode } });
 ```
 
-> **주의**: FE/BE 동시 배포 필요. 파서가 달리 설정된 클라이언트는 메시지 파싱 실패.
+#### 트레이드오프 및 대응
+
+**① 디버깅 어려움 — 가장 큰 실질적 단점**
+
+JSON은 WebSocket TEXT frame(opcode 0x1)이라 Chrome DevTools Network 탭에서 그냥 읽힌다.  
+msgpack은 WebSocket BINARY frame(opcode 0x2)으로 전송되며, DevTools는 msgpack 디코딩 로직을 내장하고 있지 않아 바이트 덩어리로만 보인다.
+
+```
+현재 (JSON):  42["updatePosition",{"x":0.5,"y":0.3}]  ← 읽힘
+msgpack 후:   <Binary Message, 34 bytes>               ← 안 읽힘
+```
+
+**대응**: 네트워크 탭 대신 애플리케이션 레이어에서 로깅한다.  
+socket.io msgpack-parser가 소켓 핸들러 도달 전에 이미 JS 객체로 디코딩하므로, 핸들러 레이어에서는 JSON과 동일하게 읽힌다.
+
+```typescript
+// FE: 개발 환경에서 수신 이벤트 전체 로깅
+if (import.meta.env.DEV) {
+  socket.onAny((event, ...args) => {
+    console.log('[socket in]', event, args);  // 이미 디코딩된 JS 객체
+  });
+}
+```
+
+**② Rolling deploy 중 클라이언트 충돌**
+
+현재 인프라가 node-1 → node-2 순차 재시작(rolling deploy)이라, 배포 창 동안 JSON BE ↔ msgpack FE 또는 그 반대 조합이 발생할 수 있다. 파서가 다르면 메시지 파싱 실패로 연결이 끊긴다.
+
+```
+배포 창:
+  node-1 (msgpack) + node-2 (JSON) 혼재
+  sticky session이 있어 대부분 같은 서버로 고정되지만,
+  재연결 시 다른 서버로 붙으면 파싱 실패
+```
+
+**대응**: 배포 순서를 FE 정적 파일 먼저 → BE 순으로 진행하되, 배포 시간대를 트래픽 최저점(새벽)으로 잡는다. 또는 nginx에서 배포 중 특정 버전 라우팅을 제어하는 방식을 사용한다.
+
+**③ FE 디코딩 CPU**
+
+브라우저의 `JSON.parse`는 네이티브 C++ 구현으로 극도로 최적화되어 있다. msgpack 디코딩은 JS 구현이므로 문자열 위주 페이로드에서는 JSON.parse보다 느릴 수 있다.
+
+| 데이터 종류 | FE 디코딩 성능 |
+|---|---|
+| 위치 데이터 (숫자 위주) | JSON보다 빠름 — 가변 길이 정수 인코딩 |
+| 채팅 메시지 (문자열 위주) | JSON.parse가 더 빠를 수 있음 |
+| 퀴즈 데이터 (혼합) | 대략 비슷하거나 약간 빠름 |
+
+QuizGround에서 가장 빈번한 페이로드가 위치 데이터(숫자)이므로 전체적으로는 이득이다.  
+FE 자체가 병목이 아닌 이상 실질적 영향은 없다.
+
+**④ FE 번들 사이즈 +~15 KB** — gzip 후 ~7 KB, 무시 가능한 수준.
+
+**⑤ Socket.IO Admin UI 호환성** — `/admin` 엔드포인트가 msgpack과 호환되는지 배포 전 확인 필요.
 
 ---
 
