@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import * as msgpackParser from 'socket.io-msgpack-parser';
+import * as msgpackParser from '../../../src/common/parser/msgpackr.parser';
 import socketEvents from '../../../src/common/constants/socket-events';
 import { SocketTestHelper } from '../setup/socket.helper';
 import { setupTestingModule } from '../setup/game.setup';

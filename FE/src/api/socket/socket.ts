@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import * as msgpackParser from 'socket.io-msgpack-parser';
+import * as msgpackParser from './msgpackr.parser';
 import SocketEvents from '@/constants/socketEvents';
 import { SocketDataMap } from './socketEventTypes';
 import mockMap from './mocks/socketMocks';

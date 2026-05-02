@@ -30,7 +30,7 @@ import { MetricService } from '../metric/metric.service';
 import { PositionBroadcastService } from './service/position-broadcast.service';
 import { RetransmitPositionDto } from './dto/retransmit-position.dto';
 import { RetransmitChatDto } from './dto/retransmit-chat.dto';
-import * as msgpackParser from 'socket.io-msgpack-parser';
+import * as msgpackParser from '../common/parser/msgpackr.parser';
 
 const CORS_ORIGINS: (string | RegExp)[] = [
   'http://localhost:5173',
