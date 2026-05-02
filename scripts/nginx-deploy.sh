@@ -33,6 +33,12 @@ fi
 # IP가 바뀔 수 있으므로 매 배포마다 설정 파일을 재생성
 echo "[DEPLOY] nginx upstream 설정 업데이트 중..."
 sudo tee /etc/nginx/conf.d/quizground.conf > /dev/null << NGINX_CONF
+log_format json_combined escape=json
+    '{"time":"\$time_iso8601","remote_addr":"\$remote_addr","method":"\$request_method",'
+    '"uri":"\$uri","status":\$status,"bytes_sent":\$body_bytes_sent,'
+    '"request_time":\$request_time,"upstream_addr":"\$upstream_addr",'
+    '"upstream_response_time":"\$upstream_response_time","user_agent":"\$http_user_agent"}';
+
 upstream quizground_backend {
     # Socket.IO sticky session: cookie로 같은 클라이언트를 같은 WAS로 고정
     sticky cookie quizground_srv expires=1h path=/ httponly samesite=lax;
@@ -67,6 +73,8 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
+
+    access_log /var/log/nginx/access.log json_combined;
 
     # FE - React SPA 라우팅
     location / {

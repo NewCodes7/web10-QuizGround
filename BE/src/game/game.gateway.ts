@@ -6,7 +6,6 @@ import {
   WebSocketServer
 } from '@nestjs/websockets';
 import { Namespace, Socket } from 'socket.io';
-import { instrument } from '@socket.io/admin-ui';
 import { Logger, UseFilters, UseInterceptors, UsePipes } from '@nestjs/common';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
 import SocketEvents from '../common/constants/socket-events';
@@ -39,7 +38,6 @@ const CORS_ORIGINS: (string | RegExp)[] = [
   'http://127.0.0.1:4173',
   'https://news.taskify.shop',
   'https://quizground.duckdns.org',
-  'https://admin.socket.io',
   'https://quizground.site',
   /\.app\.github\.dev$/
 ];
@@ -151,11 +149,6 @@ export class GameGateway {
   }
 
   afterInit(nameSpace: Namespace) {
-    instrument(nameSpace.server, {
-      auth: false,
-      mode: 'development'
-    });
-    this.logger.verbose('Socket.IO Admin UI 초기화 완료했어요!');
     this.logger.verbose('WebSocket 서버 초기화 완료했어요!');
 
     this.gameSessionService.subscribeRedisEvent(this.server).then(() => {

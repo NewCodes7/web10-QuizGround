@@ -88,11 +88,26 @@ services:
     networks:
       - monitoring
 
+  promtail:
+    image: grafana/promtail:2.9.10
+    container_name: quizground-promtail
+    restart: unless-stopped
+    volumes:
+      - ./promtail/promtail-nginx.yml:/etc/promtail/promtail.yml:ro
+      - /var/log/nginx:/var/log/nginx:ro
+      - promtail_positions:/tmp
+    command: -config.file=/etc/promtail/promtail.yml
+    depends_on:
+      - loki
+    networks:
+      - monitoring
+
 volumes:
   prometheus_data:
   grafana_data:
   loki_data:
   pyroscope_data:
+  promtail_positions:
 
 networks:
   monitoring:

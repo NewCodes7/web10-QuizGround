@@ -4,11 +4,13 @@ import { Packr, Unpackr } from 'msgpackr';
 export const protocol = 5;
 
 const packr = new Packr({ useRecords: false });
+packr.useBuffer(Buffer.allocUnsafe(2 * 1024 * 1024));
 const unpackr = new Unpackr({ useRecords: false });
 
 export class Encoder {
   encode(packet: unknown): Buffer[] {
-    return [packr.pack(packet)];
+    // useBuffer() 사용 시 pack()은 arena의 subarray를 반환하므로, 다음 호출 전에 복사.
+    return [Buffer.from(packr.pack(packet))];
   }
 }
 
