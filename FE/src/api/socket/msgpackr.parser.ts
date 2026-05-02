@@ -30,14 +30,14 @@ class SimpleEmitter {
 }
 
 export class Encoder {
-  encode(packet: unknown): Buffer[] {
+  encode(packet: unknown): Uint8Array[] {
     return [packr.pack(packet)];
   }
 }
 
 export class Decoder extends SimpleEmitter {
-  add(chunk: ArrayBuffer | Buffer): void {
-    const buf = chunk instanceof ArrayBuffer ? Buffer.from(chunk) : chunk;
+  add(chunk: ArrayBuffer | Uint8Array): void {
+    const buf = chunk instanceof ArrayBuffer ? new Uint8Array(chunk) : chunk;
     const packet = unpackr.unpack(buf);
     // socket.io-msgpack-parser의 checkPacket(type/nsp/data 유효성 검사)을 의도적으로 생략.
     // 유효하지 않은 패킷은 socket.io-client 내부에서 처리되며, 검사 비용을 줄이기 위한 선택.
