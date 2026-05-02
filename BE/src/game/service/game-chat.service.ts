@@ -250,7 +250,10 @@ export class GameChatService implements OnApplicationShutdown, OnModuleInit {
    * 실제 Redis 쓰기는 50ms 타이머 슬롯 플러시 시 수행된다.
    */
   async chatMessage(chatMessage: ChatMessageDto, clientId: string): Promise<void> {
-    const { gameId, message } = chatMessage;
+    const { gameId, message } = chatMessage as unknown as Record<string, unknown>;
+    if (typeof gameId !== 'string' || typeof message !== 'string') {
+      throw new GameWsException(SocketEvents.CHAT_MESSAGE, ExceptionMessage.INVALID_INPUT);
+    }
 
     // inputQueue 존재 여부로 방 활성 확인 (Redis ROOM hmget 제거)
     const queue = this.inputQueue.get(gameId);

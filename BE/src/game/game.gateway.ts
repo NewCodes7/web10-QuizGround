@@ -71,7 +71,6 @@ export class GameGateway {
   ) {}
 
   @SubscribeMessage(SocketEvents.UPDATE_POSITION)
-  @UsePipes(new GameValidationPipe(SocketEvents.UPDATE_POSITION))
   async handleUpdatePosition(
     @MessageBody() updatePosition: UpdatePositionDto,
     @ConnectedSocket() client: Socket
@@ -89,7 +88,6 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.CHAT_MESSAGE)
-  @UsePipes(new GameValidationPipe(SocketEvents.CHAT_MESSAGE))
   async handleChatMessage(
     @MessageBody() chatMessage: ChatMessageDto,
     @ConnectedSocket() client: Socket

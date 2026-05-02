@@ -15,6 +15,8 @@ import { GameRoomService } from './game-room.service';
 import { SetPlayerNameDto } from '../dto/set-player-name.dto';
 import { Trace, TraceClass } from '../../common/interceptor/SocketEventLoggerInterceptor';
 import { PositionBroadcastService } from './position-broadcast.service';
+import { GameWsException } from '../../common/exceptions/game.ws.exception';
+import { ExceptionMessage } from '../../common/constants/exception-message';
 
 @TraceClass()
 @Injectable()
@@ -31,7 +33,16 @@ export class GameSessionService {
   ) {}
 
   async updatePosition(updatePosition: UpdatePositionDto, clientId: string): Promise<void> {
-    const { gameId, newPosition } = updatePosition;
+    const { gameId, newPosition } = updatePosition as unknown as Record<string, unknown>;
+    if (
+      typeof gameId !== 'string' ||
+      !Array.isArray(newPosition) ||
+      newPosition.length !== 2 ||
+      typeof newPosition[0] !== 'number' ||
+      typeof newPosition[1] !== 'number'
+    ) {
+      throw new GameWsException(SocketEvents.UPDATE_POSITION, ExceptionMessage.INVALID_INPUT);
+    }
 
     // gameId·isAlive를 인메모리에서 조회해 Redis 왕복을 제거 (핫패스 최적화)
     const playerState = this.positionBroadcastService.getPlayerState(clientId);
