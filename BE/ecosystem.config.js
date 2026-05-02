@@ -6,7 +6,6 @@ module.exports = {
     {
       name: 'quiz-ground-was',
       script: 'dist/src/main.js',
-      node_args: '--trace-gc',
       kill_timeout: 30000,
       env: {
         WAS_PORT: 3000,
