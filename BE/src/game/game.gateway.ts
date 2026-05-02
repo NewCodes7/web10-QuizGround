@@ -46,8 +46,6 @@ if (process.env.CORS_ORIGIN) {
   CORS_ORIGINS.push(...process.env.CORS_ORIGIN.split(',').map((o) => o.trim()));
 }
 
-@UseInterceptors(MetricInterceptor)
-@UseInterceptors(GameActivityInterceptor)
 @UseFilters(new WsExceptionFilter())
 @WebSocketGateway({
   cors: {
@@ -79,6 +77,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.RETRANSMIT_POSITION)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.RETRANSMIT_POSITION))
   async handleRetransmitPosition(
     @MessageBody() dto: RetransmitPositionDto,
@@ -96,6 +95,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.RETRANSMIT_CHAT)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.RETRANSMIT_CHAT))
   async handleRetransmitChat(
     @MessageBody() dto: RetransmitChatDto,
@@ -105,6 +105,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.UPDATE_ROOM_OPTION)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.UPDATE_ROOM_OPTION))
   async handleUpdateRoomOption(
     @MessageBody() updateRoomOptionDto: UpdateRoomOptionDto,
@@ -114,6 +115,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.UPDATE_ROOM_QUIZSET)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.UPDATE_ROOM_QUIZSET))
   async handleUpdateRoomQuizset(
     @MessageBody() updateRoomQuizsetDto: UpdateRoomQuizsetDto,
@@ -123,6 +125,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.START_GAME)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.START_GAME))
   async handleStartGame(
     @MessageBody() startGameDto: StartGameDto,
@@ -132,6 +135,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.SET_PLAYER_NAME)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.SET_PLAYER_NAME))
   async handleSetPlayerName(
     @MessageBody() setPlayerNameDto: SetPlayerNameDto,
@@ -141,6 +145,7 @@ export class GameGateway {
   }
 
   @SubscribeMessage(SocketEvents.KICK_ROOM)
+  @UseInterceptors(MetricInterceptor, GameActivityInterceptor)
   @UsePipes(new GameValidationPipe(SocketEvents.KICK_ROOM))
   async handleKickRoom(@MessageBody() kickRoomDto: KickRoomDto, @ConnectedSocket() client: Socket) {
     await this.gameRoomService.kickRoom(kickRoomDto, client.data.playerId);

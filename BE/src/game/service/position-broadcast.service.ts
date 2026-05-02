@@ -171,6 +171,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   private readonly retransmitFallbackCounter: promClient.Counter;
   private readonly inputQueueSizeGauge: promClient.Gauge;
   private readonly flushDurationHistogram: promClient.Histogram;
+  private readonly writeRoomDurationHistogram: promClient.Histogram;
 
   constructor(@InjectRedis() private readonly redis: Redis) {
     for (let i = 0; i < POSITION_MAX_TIMERS; i++) {
@@ -201,6 +202,13 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       help: 'Time taken to flush one room in milliseconds',
       labelNames: ['gameId'],
       buckets: [5, 10, 20, 50, 100, 500, 1000, 2500, 5000, 10000, 20000, 30000]
+    });
+
+    this.writeRoomDurationHistogram = new promClient.Histogram({
+      name: 'position_write_duration_ms',
+      help: 'Time taken to write one room batch to Redis (IN phase) in milliseconds',
+      labelNames: ['gameId'],
+      buckets: [1, 2, 5, 10, 20, 50, 100, 500, 1000, 5000]
     });
   }
 
@@ -626,6 +634,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     }
 
     const elapsed = Date.now() - writeStart;
+    this.writeRoomDurationHistogram.labels(gameId).observe(elapsed);
     this.logger.debug(
       `[writeRoom] done — gameId=${gameId} seq=${seq} batchSize=${batch.length} elapsed=${elapsed}ms`
     );

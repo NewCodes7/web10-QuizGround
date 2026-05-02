@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
-import { GameActivityInterceptor } from './game/middleware/game-activity.interceptor';
 import { KstLogger } from './common/logger/kst.logger';
 
 async function bootstrap() {
@@ -14,9 +13,6 @@ async function bootstrap() {
   });
   app.enableCors();
   app.enableShutdownHooks();
-
-  // 전역 인터셉터로 등록
-  app.useGlobalInterceptors(app.get(GameActivityInterceptor));
 
   const port = process.env.WAS_PORT || 3000;
   await app.listen(port);
