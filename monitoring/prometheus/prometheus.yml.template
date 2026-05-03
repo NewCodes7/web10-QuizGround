@@ -43,15 +43,11 @@ scrape_configs:
         labels:
           instance: 'redis'
 
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx_exporter:9113']
-
-  - job_name: 'nginx-system'
+  - job_name: 'monitoring-vm-system'
     static_configs:
       - targets: ['host.docker.internal:9100']
         labels:
-          instance: 'nginx'
+          instance: 'monitoring-vm'
 
   - job_name: 'prometheus'
     static_configs:

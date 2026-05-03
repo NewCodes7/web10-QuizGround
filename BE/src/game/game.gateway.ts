@@ -215,4 +215,8 @@ export class GameGateway {
     await this.gameRoomService.handlePlayerExit(client.data.playerId);
     this.metricService.setWsClients(this.server.sockets.size);
   }
+
+  getConnectionCount(): number {
+    return this.server?.sockets.size ?? 0;
+  }
 }

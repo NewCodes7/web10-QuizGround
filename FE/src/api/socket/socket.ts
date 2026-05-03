@@ -44,6 +44,9 @@ class SocketService {
 
   async connect(header: { 'create-room'?: string; 'game-id'?: string }) {
     if (this.isActive()) return;
+    if (!this.url) {
+      this.url = await pickServer();
+    }
     const gameId = header['game-id'];
     if (gameId && gameId in mockMap) {
       // mock과 연결
@@ -79,6 +82,7 @@ class SocketService {
 
   disconnect() {
     if (this.socket && this.isActive()) this.socket.disconnect();
+    if (!FIXED_URL) this.url = '';
   }
 
   isActive() {
@@ -132,7 +136,34 @@ class SocketService {
   }
 }
 
-const socketUrl =
-  import.meta.env.VITE_SOCKET_URL ||
-  (import.meta.env.DEV ? 'http://localhost:3000/game' : `${window.location.origin}/game`);
-export const socketService = new SocketService(socketUrl);
+const NODE1_URL = import.meta.env.VITE_NODE1_URL;
+const NODE2_URL = import.meta.env.VITE_NODE2_URL;
+const FIXED_URL = import.meta.env.VITE_SOCKET_URL;
+
+async function pickServer(): Promise<string> {
+  if (FIXED_URL) return FIXED_URL;
+  if (NODE1_URL && !NODE2_URL) return `${NODE1_URL}/game`;
+  if (!NODE1_URL) {
+    return import.meta.env.DEV ? 'http://localhost:3000/game' : `${window.location.origin}/game`;
+  }
+
+  async function fetchPlayers(baseUrl: string): Promise<number> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    try {
+      const res = await fetch(`${baseUrl}/api/status`, { signal: ctrl.signal });
+      if (!res.ok) return Infinity;
+      const data = await res.json();
+      return typeof data.players === 'number' ? data.players : Infinity;
+    } catch {
+      return Infinity;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const [c1, c2] = await Promise.all([fetchPlayers(NODE1_URL), fetchPlayers(NODE2_URL!)]);
+  return `${c1 <= c2 ? NODE1_URL : NODE2_URL}/game`;
+}
+
+export const socketService = new SocketService('');

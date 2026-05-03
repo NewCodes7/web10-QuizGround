@@ -21,6 +21,7 @@ import { SocketEventLoggerInterceptor } from '../common/interceptor/SocketEventL
 import { SystemMetricsService } from '../common/service/SystemMetricsService';
 import { PositionBroadcastService } from './service/position-broadcast.service';
 import { ChatMessageModel } from './entities/chat-message.entity';
+import { StatusController } from './status.controller';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ChatMessageModel } from './entities/chat-message.entity';
     AuthModule,
     TypeOrmModule.forFeature([ChatMessageModel])
   ],
+  controllers: [StatusController],
   providers: [
     GameGateway,
     GameSessionService,
