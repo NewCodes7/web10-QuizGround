@@ -60,7 +60,7 @@ npm run lint               # eslint
 | DB_PASSWD | test | |
 | DB_NAME | test_db | |
 | REDIS_URL | redis://localhost:6379 | |
-| WAS_PORT | 3000 | |
+| WAS_PORT | 446 | |
 | DEV | - | enables TypeORM synchronize |
 
 ---
