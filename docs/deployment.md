@@ -159,7 +159,7 @@ gcloud compute project-info add-metadata \
 
 ### 6. GitHub Secrets 등록
 
-GitHub 저장소 → Settings → Secrets and variables → Actions에서 아래 6개를 등록합니다.
+GitHub 저장소 → Settings → Secrets and variables → Actions에서 아래 7개를 등록합니다.
 
 | Secret 이름 | 값 | 설명 |
 |-------------|-----|------|
@@ -168,7 +168,8 @@ GitHub 저장소 → Settings → Secrets and variables → Actions에서 아래
 | `GCE_HOST_NGINX` | nginx VM 외부 IP | bastion 겸 nginx 배포 대상 |
 | `GCE_INTERNAL_IP_NODE1` | node-1 내부 IP (`10.10.x.x`) | quizground 네트워크 IP |
 | `GCE_INTERNAL_IP_NODE2` | node-2 내부 IP (`10.10.x.x`) | quizground 네트워크 IP |
-| `ENV` | 프로덕션 `.env` 파일 내용 전체 | BE 환경변수 |
+| `ENV` | 프로덕션 `.env` 파일 내용 전체 (`CORS_ORIGIN` 제외) | BE 환경변수 |
+| `CORS_ORIGIN` | 허용할 origin 목록 (쉼표 구분) | WebSocket CORS 허용 origin 별도 주입 |
 
 내부 IP 확인:
 ```bash
@@ -198,6 +199,8 @@ COOKIE_SECURE=true
 ```
 
 > `DEV` 변수는 포함하지 마세요. 없으면 프로덕션 모드(TypeORM synchronize 비활성화)로 동작합니다.
+
+`CORS_ORIGIN`은 `ENV`에 넣지 말고 GitHub Actions Secret의 별도 `CORS_ORIGIN` 키에 등록하세요. 값은 쉼표 구분 문자열입니다. 예: `https://quizground.site,https://admin.quizground.site`
 
 ### 8. mysql / redis VM 설정
 

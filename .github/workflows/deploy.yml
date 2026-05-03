@@ -66,6 +66,15 @@ jobs:
             echo "DEBUG_TOKEN=$DEBUG_TOKEN" >> .env
           fi
 
+      - name: CORS_ORIGIN 별도 Secret 주입 (선택)
+        env:
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+        run: |
+          if [ -n "$CORS_ORIGIN" ]; then
+            sed -i '/^CORS_ORIGIN=/d' .env
+            echo "CORS_ORIGIN=$CORS_ORIGIN" >> .env
+          fi
+
       # 테스트 활성화 시 주석 해제
       # - name: BE 단위 테스트
       #   working-directory: ./BE
