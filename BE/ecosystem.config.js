@@ -1,5 +1,6 @@
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const result = require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const dotenvVars = result.parsed || {};
 
 module.exports = {
   apps: [
@@ -8,6 +9,7 @@ module.exports = {
       script: 'dist/src/main.js',
       kill_timeout: 30000,
       env: {
+        ...dotenvVars,
         WAS_PORT: 3000,
       }
     }
