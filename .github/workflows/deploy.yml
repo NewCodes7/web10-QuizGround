@@ -86,30 +86,6 @@ jobs:
           VITE_NODE2_URL: http://${{ secrets.GCE_EXTERNAL_IP_NODE2 }}:3000
         run: npm run build
 
-      - name: GCP 인증
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: FE 정적 파일 GCS 업로드 (해시된 에셋)
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: FE/dist
-          destination: ${{ secrets.GCS_BUCKET }}
-          parent: false
-          headers: |-
-            cache-control: public, max-age=31536000, immutable
-          process_gcloudignore: false
-
-      - name: index.html GCS 업로드 (no-cache)
-        uses: google-github-actions/upload-cloud-storage@v2
-        with:
-          path: FE/dist/index.html
-          destination: ${{ secrets.GCS_BUCKET }}
-          parent: false
-          headers: |-
-            cache-control: no-cache, no-store, must-revalidate
-
       - name: BE 배포 패키지 생성 (be.tar.gz)
         run: |
           tar -czf be.tar.gz \
@@ -120,11 +96,19 @@ jobs:
             BE/ecosystem.config.js \
             scripts/was-deploy.sh
 
+      - name: FE 배포 패키지 생성 (fe.tar.gz)
+        run: |
+          tar -czf fe.tar.gz \
+            FE/dist \
+            scripts/nginx-deploy.sh
+
       - name: 빌드 아티팩트 업로드
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: be.tar.gz
+          path: |
+            be.tar.gz
+            fe.tar.gz
           retention-days: 1
 
   # ── 2. node-1 배포 ──────────────────────────────────────────────
@@ -236,3 +220,47 @@ jobs:
             bash scripts/was-deploy.sh
           "
 
+  # ── 4. nginx 배포 (WAS 양쪽 완료 후) ────────────────────────────
+  deploy-nginx:
+    name: Deploy to nginx
+    needs: deploy-node2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 빌드 아티팩트 다운로드
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+
+      - name: SSH 설정
+        env:
+          SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          {
+            echo "Host nginx"
+            echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
+            echo "  User ${{ secrets.GCE_USERNAME }}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile /dev/null"
+          } >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: fe.tar.gz 전송
+        run: |
+          ssh nginx "mkdir -p ~/quizground/tobe"
+          scp fe.tar.gz nginx:~/quizground/tobe/
+
+      - name: nginx 배포 실행
+        run: |
+          ssh nginx "
+            set -e
+            cd ~/quizground/tobe
+            tar -xzf fe.tar.gz
+            rm fe.tar.gz
+            chmod +x scripts/nginx-deploy.sh
+            bash scripts/nginx-deploy.sh
+          "
