@@ -91,8 +91,8 @@ jobs:
       - name: FE 빌드
         working-directory: ./FE
         env:
-          VITE_NODE1_URL: http://${{ secrets.GCE_EXTERNAL_IP_NODE1 }}:446
-          VITE_NODE2_URL: http://${{ secrets.GCE_EXTERNAL_IP_NODE2 }}:446
+          VITE_NODE1_URL: http://${{ secrets.GCE_EXTERNAL_IP_NODE1 }}:1027
+          VITE_NODE2_URL: http://${{ secrets.GCE_EXTERNAL_IP_NODE2 }}:1027
         run: npm run build
 
       - name: BE 배포 패키지 생성 (be.tar.gz)

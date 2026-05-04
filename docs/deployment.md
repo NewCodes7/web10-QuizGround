@@ -8,8 +8,8 @@
   ▼
 nginx VM (:80)          ← FE 정적 파일 서빙 + BE 리버스 프록시 (외부 IP 보유)
   │  ip_hash upstream
-  ├──▶ node-1 VM (:446)  ← NestJS WAS (내부 IP만)
-  └──▶ node-2 VM (:446)  ← NestJS WAS (내부 IP만)
+  ├──▶ node-1 VM (:1027)  ← NestJS WAS (내부 IP만)
+  └──▶ node-2 VM (:1027)  ← NestJS WAS (내부 IP만)
             │
      quizground VPC 내부망
             ├──▶ mysql VM (:3306)
@@ -184,7 +184,7 @@ gcloud compute instances list
 `ENV` 시크릿에 등록할 내용:
 
 ```env
-WAS_PORT=446
+WAS_PORT=1027
 
 DB_HOST=<mysql VM 내부 IP>
 DB_PORT=3306

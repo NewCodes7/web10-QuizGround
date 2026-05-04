@@ -19,7 +19,7 @@ async function bootstrap() {
   });
   app.enableShutdownHooks();
 
-  const port = process.env.WAS_PORT || 446;
+  const port = process.env.WAS_PORT || 1027;
   await app.listen(port);
   Logger.log(`Application running on port ${port}`);
 }

@@ -10,7 +10,7 @@ module.exports = {
       kill_timeout: 30000,
       env: {
         ...dotenvVars,
-        WAS_PORT: 446,
+        WAS_PORT: 1027,
       }
     }
   ]
