@@ -251,6 +251,7 @@ jobs:
             NODE1_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE1 }} \
             NODE2_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_NODE2 }} \
             REDIS_INTERNAL_IP=${{ secrets.GCE_INTERNAL_IP_REDIS }} \
+            NODE_APP_PORT=1027 \
             GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }} \
             bash scripts/monitoring-deploy.sh
             rm -rf ~/monitoring-tobe

@@ -7,7 +7,7 @@ global:
 scrape_configs:
   - job_name: 'node1-app'
     static_configs:
-      - targets: ['${NODE1_INTERNAL_IP}:3000']
+      - targets: ['${NODE1_INTERNAL_IP}:${NODE_APP_PORT}']
         labels:
           instance: 'node1'
     metrics_path: '/api/metric/prometheus'
@@ -15,7 +15,7 @@ scrape_configs:
 
   - job_name: 'node2-app'
     static_configs:
-      - targets: ['${NODE2_INTERNAL_IP}:3000']
+      - targets: ['${NODE2_INTERNAL_IP}:${NODE_APP_PORT}']
         labels:
           instance: 'node2'
     metrics_path: '/api/metric/prometheus'

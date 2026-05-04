@@ -2,12 +2,14 @@
 # 모니터링 스택 배포 스크립트 - nginx VM에서 실행
 # Prometheus + Grafana + redis_exporter + nginx_exporter (Docker Compose)
 # 필수 환경변수: NODE1_INTERNAL_IP, NODE2_INTERNAL_IP, REDIS_INTERNAL_IP, GRAFANA_ADMIN_PASSWORD
+# 선택 환경변수: NODE_APP_PORT (기본값: 1027)
 set -e
 
 : "${NODE1_INTERNAL_IP:?NODE1_INTERNAL_IP 환경변수가 설정되지 않았습니다}"
 : "${NODE2_INTERNAL_IP:?NODE2_INTERNAL_IP 환경변수가 설정되지 않았습니다}"
 : "${REDIS_INTERNAL_IP:?REDIS_INTERNAL_IP 환경변수가 설정되지 않았습니다}"
 : "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 환경변수가 설정되지 않았습니다}"
+NODE_APP_PORT="${NODE_APP_PORT:-1027}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOBE_DIR="$(dirname "$SCRIPT_DIR")"
@@ -36,8 +38,8 @@ cp -r "$TOBE_DIR/monitoring/." "$DEPLOY_DIR/"
 
 # ── 3. prometheus.yml 생성 (envsubst로 IP 치환) ───────────────────────
 echo "[DEPLOY] prometheus.yml 생성 중 (내부 IP 치환)..."
-export NODE1_INTERNAL_IP NODE2_INTERNAL_IP REDIS_INTERNAL_IP
-envsubst '${NODE1_INTERNAL_IP} ${NODE2_INTERNAL_IP} ${REDIS_INTERNAL_IP}' \
+export NODE1_INTERNAL_IP NODE2_INTERNAL_IP REDIS_INTERNAL_IP NODE_APP_PORT
+envsubst '${NODE1_INTERNAL_IP} ${NODE2_INTERNAL_IP} ${REDIS_INTERNAL_IP} ${NODE_APP_PORT}' \
   < "$DEPLOY_DIR/prometheus/prometheus.yml.template" \
   > "$DEPLOY_DIR/prometheus/prometheus.yml"
 
