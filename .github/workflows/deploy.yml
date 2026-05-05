@@ -147,6 +147,8 @@ jobs:
             echo "  IdentityFile ~/.ssh/id_rsa"
             echo "  StrictHostKeyChecking no"
             echo "  UserKnownHostsFile /dev/null"
+            echo "  ServerAliveInterval 60"
+            echo "  ServerAliveCountMax 10"
             echo ""
             echo "Host node1"
             echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}"
@@ -155,6 +157,8 @@ jobs:
             echo "  ProxyJump nginx-bastion"
             echo "  StrictHostKeyChecking no"
             echo "  UserKnownHostsFile /dev/null"
+            echo "  ServerAliveInterval 60"
+            echo "  ServerAliveCountMax 10"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
@@ -201,6 +205,8 @@ jobs:
             echo "  IdentityFile ~/.ssh/id_rsa"
             echo "  StrictHostKeyChecking no"
             echo "  UserKnownHostsFile /dev/null"
+            echo "  ServerAliveInterval 60"
+            echo "  ServerAliveCountMax 10"
             echo ""
             echo "Host node2"
             echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}"
@@ -209,6 +215,8 @@ jobs:
             echo "  ProxyJump nginx-bastion"
             echo "  StrictHostKeyChecking no"
             echo "  UserKnownHostsFile /dev/null"
+            echo "  ServerAliveInterval 60"
+            echo "  ServerAliveCountMax 10"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
