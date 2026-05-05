@@ -164,7 +164,7 @@ jobs:
 
       - name: be.tar.gz 전송
         run: |
-          ssh node1 "mkdir -p ~/quizground/tobe"
+          ssh node1 "rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe"
           scp be.tar.gz node1:~/quizground/tobe/
 
       - name: node-1 배포 실행
@@ -222,7 +222,7 @@ jobs:
 
       - name: be.tar.gz 전송
         run: |
-          ssh node2 "mkdir -p ~/quizground/tobe"
+          ssh node2 "rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe"
           scp be.tar.gz node2:~/quizground/tobe/
 
       - name: node-2 배포 실행
