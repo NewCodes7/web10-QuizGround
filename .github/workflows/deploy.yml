@@ -121,7 +121,8 @@ jobs:
           retention-days: 1
 
   # ── 2. node-1 배포 ──────────────────────────────────────────────
-  # node-1/2는 외부 IP 없음 → nginx VM을 jump host(bastion)로 경유
+  # ProxyJump(TCP forwarding) 대신 nginx-bastion에서 직접 SSH 실행
+  # GitHub Actions → nginx(외부IP) → node1(내부IP) 2단계 연결
   deploy-node1:
     name: Deploy to node-1
     needs: build
@@ -133,7 +134,7 @@ jobs:
         with:
           name: build-artifacts
 
-      - name: SSH 설정 (nginx bastion 경유)
+      - name: SSH 설정 (nginx 직접)
         env:
           SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
         run: |
@@ -141,7 +142,7 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           {
-            echo "Host nginx-bastion"
+            echo "Host nginx"
             echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
             echo "  User ${{ secrets.GCE_USERNAME }}"
             echo "  IdentityFile ~/.ssh/id_rsa"
@@ -149,34 +150,35 @@ jobs:
             echo "  UserKnownHostsFile /dev/null"
             echo "  ServerAliveInterval 60"
             echo "  ServerAliveCountMax 10"
-            echo ""
-            echo "Host node1"
-            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE1 }}"
-            echo "  User ${{ secrets.GCE_USERNAME }}"
-            echo "  IdentityFile ~/.ssh/id_rsa"
-            echo "  ProxyJump nginx-bastion"
-            echo "  StrictHostKeyChecking no"
-            echo "  UserKnownHostsFile /dev/null"
-            echo "  ServerAliveInterval 60"
-            echo "  ServerAliveCountMax 10"
+            echo "  ForwardAgent yes"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_rsa
 
-      - name: be.tar.gz 전송
+      - name: nginx 경유 node-1 배포
         run: |
-          ssh node1 "rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe"
-          scp be.tar.gz node1:~/quizground/tobe/
+          # be.tar.gz를 nginx-bastion 임시 디렉토리로 전송
+          ssh nginx "rm -rf ~/node1-deploy-tmp && mkdir -p ~/node1-deploy-tmp"
+          scp be.tar.gz nginx:~/node1-deploy-tmp/
 
-      - name: node-1 배포 실행
-        run: |
-          ssh node1 "
+          # nginx-bastion에서 node-1으로 배포 (agent forwarding 활용)
+          ssh -A nginx "
             set -e
-            cd ~/quizground/tobe
-            tar -xzf be.tar.gz
-            rm be.tar.gz
-            echo 'PYROSCOPE_INSTANCE=node1' >> .env
-            chmod +x scripts/was-deploy.sh
-            bash scripts/was-deploy.sh
+            N1='${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_INTERNAL_IP_NODE1 }}'
+            O='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60'
+            ssh \$O \$N1 'rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe'
+            scp \$O ~/node1-deploy-tmp/be.tar.gz \$N1:~/quizground/tobe/
+            ssh \$O \$N1 '
+              set -e
+              cd ~/quizground/tobe
+              tar -xzf be.tar.gz
+              rm be.tar.gz
+              echo PYROSCOPE_INSTANCE=node1 >> .env
+              chmod +x scripts/was-deploy.sh
+              bash scripts/was-deploy.sh
+            '
+            rm -rf ~/node1-deploy-tmp
           "
 
   # ── 3. node-2 배포 (node-1 완료 후 순차 실행 → rolling deploy) ──
@@ -191,7 +193,7 @@ jobs:
         with:
           name: build-artifacts
 
-      - name: SSH 설정 (nginx bastion 경유)
+      - name: SSH 설정 (nginx 직접)
         env:
           SSH_KEY: ${{ secrets.GCE_PRIVATE_KEY }}
         run: |
@@ -199,7 +201,7 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           {
-            echo "Host nginx-bastion"
+            echo "Host nginx"
             echo "  HostName ${{ secrets.GCE_HOST_NGINX }}"
             echo "  User ${{ secrets.GCE_USERNAME }}"
             echo "  IdentityFile ~/.ssh/id_rsa"
@@ -207,34 +209,35 @@ jobs:
             echo "  UserKnownHostsFile /dev/null"
             echo "  ServerAliveInterval 60"
             echo "  ServerAliveCountMax 10"
-            echo ""
-            echo "Host node2"
-            echo "  HostName ${{ secrets.GCE_INTERNAL_IP_NODE2 }}"
-            echo "  User ${{ secrets.GCE_USERNAME }}"
-            echo "  IdentityFile ~/.ssh/id_rsa"
-            echo "  ProxyJump nginx-bastion"
-            echo "  StrictHostKeyChecking no"
-            echo "  UserKnownHostsFile /dev/null"
-            echo "  ServerAliveInterval 60"
-            echo "  ServerAliveCountMax 10"
+            echo "  ForwardAgent yes"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_rsa
 
-      - name: be.tar.gz 전송
+      - name: nginx 경유 node-2 배포
         run: |
-          ssh node2 "rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe"
-          scp be.tar.gz node2:~/quizground/tobe/
+          # be.tar.gz를 nginx-bastion 임시 디렉토리로 전송
+          ssh nginx "rm -rf ~/node2-deploy-tmp && mkdir -p ~/node2-deploy-tmp"
+          scp be.tar.gz nginx:~/node2-deploy-tmp/
 
-      - name: node-2 배포 실행
-        run: |
-          ssh node2 "
+          # nginx-bastion에서 node-2으로 배포 (agent forwarding 활용)
+          ssh -A nginx "
             set -e
-            cd ~/quizground/tobe
-            tar -xzf be.tar.gz
-            rm be.tar.gz
-            echo 'PYROSCOPE_INSTANCE=node2' >> .env
-            chmod +x scripts/was-deploy.sh
-            bash scripts/was-deploy.sh
+            N2='${{ secrets.GCE_USERNAME }}@${{ secrets.GCE_INTERNAL_IP_NODE2 }}'
+            O='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60'
+            ssh \$O \$N2 'rm -rf ~/quizground/tobe && mkdir -p ~/quizground/tobe'
+            scp \$O ~/node2-deploy-tmp/be.tar.gz \$N2:~/quizground/tobe/
+            ssh \$O \$N2 '
+              set -e
+              cd ~/quizground/tobe
+              tar -xzf be.tar.gz
+              rm be.tar.gz
+              echo PYROSCOPE_INSTANCE=node2 >> .env
+              chmod +x scripts/was-deploy.sh
+              bash scripts/was-deploy.sh
+            '
+            rm -rf ~/node2-deploy-tmp
           "
 
   # ── 4. nginx 배포 (WAS 양쪽 완료 후) ────────────────────────────
