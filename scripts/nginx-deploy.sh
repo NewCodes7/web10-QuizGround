@@ -32,6 +32,11 @@ log_format json_combined escape=json
     '"uri":"$uri","status":$status,"bytes_sent":$body_bytes_sent,'
     '"request_time":$request_time,"user_agent":"$http_user_agent"}';
 
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 # nginx_exporter용 stub_status (localhost + Docker bridge에서만 접근 가능)
 server {
     listen 127.0.0.1:8080;
@@ -54,7 +59,7 @@ server {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
