@@ -150,11 +150,15 @@ jobs:
             echo "  UserKnownHostsFile /dev/null"
             echo "  ServerAliveInterval 60"
             echo "  ServerAliveCountMax 10"
+            echo "  ConnectTimeout 30"
             echo "  ForwardAgent yes"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/id_rsa
+          # SSH_AUTH_SOCK을 다음 step에서도 사용할 수 있도록 전달
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> $GITHUB_ENV
 
       - name: nginx 경유 node-1 배포
         run: |
@@ -209,11 +213,15 @@ jobs:
             echo "  UserKnownHostsFile /dev/null"
             echo "  ServerAliveInterval 60"
             echo "  ServerAliveCountMax 10"
+            echo "  ConnectTimeout 30"
             echo "  ForwardAgent yes"
           } >> ~/.ssh/config
           chmod 600 ~/.ssh/config
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/id_rsa
+          # SSH_AUTH_SOCK을 다음 step에서도 사용할 수 있도록 전달
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> $GITHUB_ENV
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> $GITHUB_ENV
 
       - name: nginx 경유 node-2 배포
         run: |
