@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import * as v8 from 'node:v8';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 
 export interface SnapshotInfo {
   id: string;
@@ -16,7 +17,9 @@ export class HeapSnapshotService {
   private readonly snapshots = new Map<string, SnapshotInfo>();
 
   takeSnapshot(label = 'manual'): SnapshotInfo {
-    const filePath = v8.writeHeapSnapshot(os.tmpdir());
+    const filePath = v8.writeHeapSnapshot(
+      path.join(os.tmpdir(), `heap-${process.pid}-${Date.now()}.heapsnapshot`)
+    );
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
     const sizeBytes = fs.statSync(filePath).size;
     const info: SnapshotInfo = { id, label, filePath, takenAt: Date.now(), sizeBytes };

@@ -176,7 +176,9 @@ export class DebugController {
   @Get('heap')
   heapSnapshot(@Query('token') token: string, @Res() res: Response) {
     this.validateToken(token);
-    const filePath = v8.writeHeapSnapshot(os.tmpdir());
+    const filePath = v8.writeHeapSnapshot(
+      path.join(os.tmpdir(), `heap-${process.pid}-${Date.now()}.heapsnapshot`)
+    );
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
     res.sendFile(filePath, (err) => {
