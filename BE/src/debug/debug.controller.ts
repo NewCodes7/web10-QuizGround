@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Post,
@@ -19,6 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import Redis from 'ioredis';
+import { HeapSnapshotService } from './heap-snapshot.service';
 
 interface JobMeta {
   status: 'running' | 'done' | 'error';
@@ -31,7 +33,10 @@ const LOCK_KEY = 'Debug:ProfileLock';
 
 @Controller('api/debug')
 export class DebugController {
-  constructor(@InjectRedis() private readonly redis: Redis) {}
+  constructor(
+    @InjectRedis() private readonly redis: Redis,
+    private readonly heapSnapshotService: HeapSnapshotService
+  ) {}
 
   /**
    * CPU 플레임그래프 UI — 브라우저에서 버튼으로 프로파일링 트리거
@@ -165,7 +170,7 @@ export class DebugController {
   }
 
   /**
-   * 힙 스냅샷 다운로드
+   * 힙 스냅샷 단일 즉시 다운로드 (backward compat)
    * GET /api/debug/heap?token=SECRET
    */
   @Get('heap')
@@ -180,6 +185,71 @@ export class DebugController {
         res.status(500).end();
       }
     });
+  }
+
+  /**
+   * 스냅샷 촬영 후 저장 (비교 분석용)
+   * POST /api/debug/heap/take?token=SECRET&label=baseline
+   */
+  @Post('heap/take')
+  heapTake(@Query('token') token: string, @Query('label') label = 'manual') {
+    this.validateToken(token);
+    const { id, takenAt, sizeBytes, filePath: _ } = this.heapSnapshotService.takeSnapshot(label);
+    return { id, label, takenAt, sizeBytes };
+  }
+
+  /**
+   * 저장된 스냅샷 목록
+   * GET /api/debug/heap/list?token=SECRET
+   */
+  @Get('heap/list')
+  heapList(@Query('token') token: string) {
+    this.validateToken(token);
+    return this.heapSnapshotService.list().map(({ id, label, takenAt, sizeBytes }) => ({
+      id,
+      label,
+      takenAt,
+      sizeBytes
+    }));
+  }
+
+  /**
+   * 저장된 스냅샷 다운로드
+   * GET /api/debug/heap/download?token=SECRET&id=xxx
+   */
+  @Get('heap/download')
+  heapDownload(@Query('token') token: string, @Query('id') id: string, @Res() res: Response) {
+    this.validateToken(token);
+    const filePath = this.heapSnapshotService.getFilePath(id);
+    if (!filePath) throw new NotFoundException('Snapshot not found');
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+    res.sendFile(filePath, (err) => {
+      if (err && !res.headersSent) res.status(500).end();
+    });
+  }
+
+  /**
+   * 저장된 스냅샷 삭제
+   * DELETE /api/debug/heap/delete?token=SECRET&id=xxx
+   */
+  @Delete('heap/delete')
+  heapDelete(@Query('token') token: string, @Query('id') id: string) {
+    this.validateToken(token);
+    const deleted = this.heapSnapshotService.delete(id);
+    if (!deleted) throw new NotFoundException('Snapshot not found');
+    return { deleted: true };
+  }
+
+  /**
+   * 힙 스냅샷 관리 UI
+   * GET /api/debug/heap/ui?token=SECRET
+   */
+  @Get('heap/ui')
+  heapUi(@Query('token') token: string, @Res() res: Response) {
+    this.validateToken(token);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(buildHeapUiHtml(token));
   }
 
   private async collectProfile(seconds: number): Promise<Profiler.Profile> {
@@ -206,6 +276,160 @@ export class DebugController {
       throw new UnauthorizedException();
     }
   }
+}
+
+// ─── Heap UI HTML ───────────────────────────────────────────────────────────
+
+function buildHeapUiHtml(token: string): string {
+  const safeToken = JSON.stringify(token);
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heap Snapshot Manager</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.6 'Segoe UI',system-ui,sans-serif;background:#0f0f13;color:#e0e0e0;padding:24px}
+h1{font-size:22px;color:#fff;margin-bottom:4px}
+.subtitle{color:#555;font-size:12px;margin-bottom:24px}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#1a1a2e;border-radius:10px;padding:16px 20px;margin-bottom:20px}
+label{color:#aaa;font-size:13px}
+input[type=text]{padding:7px 12px;border-radius:6px;background:#1e1e2e;border:1px solid #333;color:#e0e0e0;font-size:13px;width:220px}
+input[type=text]:focus{outline:none;border-color:#4f46e5}
+.btn{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:background .15s}
+.btn-primary{background:#4f46e5;color:#fff}
+.btn-primary:hover:not(:disabled){background:#4338ca}
+.btn-primary:disabled{background:#2a2a3e;color:#555;cursor:not-allowed}
+.btn-sm{padding:5px 12px;border-radius:6px;border:1px solid #333;background:#1e1e2e;color:#aaa;font-size:12px;cursor:pointer}
+.btn-sm:hover{background:#252535;color:#ddd}
+.btn-danger{border-color:#7f1d1d;color:#fca5a5}
+.btn-danger:hover{background:#1f1015;color:#fca5a5}
+#msg{font-size:13px;color:#4ade80;min-height:20px;margin-bottom:8px}
+#msg.err{color:#fca5a5}
+table{width:100%;border-collapse:collapse;font-size:13px;background:#111118;border-radius:10px;overflow:hidden}
+th{text-align:left;padding:10px 14px;background:#1a1a2e;color:#888;font-weight:500}
+td{padding:8px 14px;border-bottom:1px solid #1a1a2e}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#14141e}
+.id{font-family:monospace;font-size:11px;color:#555}
+.lbl{color:#93c5fd;font-weight:500}
+.sz{color:#6b7280}
+.ts{color:#6b7280;font-size:12px}
+.actions{display:flex;gap:6px}
+.hint{margin-top:24px;background:#131320;border:1px solid #1e1e30;border-radius:10px;padding:18px 20px;font-size:13px;color:#888;line-height:1.8}
+.hint h3{color:#aaa;font-size:14px;margin-bottom:8px}
+.hint code{background:#1a1a2e;padding:2px 6px;border-radius:4px;color:#93c5fd;font-family:monospace;font-size:12px}
+.badge{display:inline-block;background:#1e1e2e;border:1px solid #2a2a3e;border-radius:4px;padding:1px 8px;font-size:11px;color:#888;margin-right:4px}
+</style>
+</head>
+<body>
+<h1>Heap Snapshot Manager</h1>
+<p class="subtitle">V8 Heap Snapshot — Old gen retention 분석용 | QuizGround Debug</p>
+
+<div class="controls">
+  <label for="lbl-input">Label</label>
+  <input type="text" id="lbl-input" value="baseline" placeholder="baseline / t7-before-spike">
+  <button class="btn btn-primary" id="take-btn" onclick="takeSnapshot()">Take Snapshot</button>
+</div>
+
+<div id="msg"></div>
+
+<table id="snap-table">
+  <thead><tr><th>#</th><th>Label</th><th>Time (KST)</th><th>Size</th><th>ID</th><th>Actions</th></tr></thead>
+  <tbody id="snap-tbody"><tr><td colspan="6" style="color:#444;text-align:center;padding:20px">Loading...</td></tr></tbody>
+</table>
+
+<div class="hint">
+  <h3>Chrome DevTools Comparison 방법</h3>
+  1. <code>baseline</code> 스냅샷 다운로드 → <code>t7-before-spike</code> 스냅샷 다운로드<br>
+  2. Chrome → F12 → Memory 탭 → <strong>Load</strong> 버튼으로 #1 로드<br>
+  3. 다시 <strong>Load</strong> 버튼으로 #2 로드<br>
+  4. 상단 드롭다운에서 <strong>Comparison</strong> 선택<br>
+  5. <strong>Retained Size</strong> 열 내림차순 정렬 → Old gen에 누적된 객체 타입 확인<br><br>
+  <strong>SIGUSR2 트리거:</strong> <code>kill -USR2 $(pgrep -f "node dist/main")</code> → 서버 로그에 스냅샷 경로 출력, 이 UI에서 목록 확인
+</div>
+
+<script>
+const TOKEN = ${safeToken};
+let refreshTimer = null;
+
+async function takeSnapshot() {
+  const label = document.getElementById('lbl-input').value.trim() || 'manual';
+  const btn = document.getElementById('take-btn');
+  btn.disabled = true;
+  setMsg('');
+  try {
+    const r = await fetch('/api/debug/heap/take?token=' + TOKEN + '&label=' + encodeURIComponent(label), { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.message || r.statusText);
+    setMsg('Snapshot taken: ' + d.id + ' (' + fmt(d.sizeBytes) + ')');
+    await loadList();
+  } catch(e) { setMsg(e.message, true); }
+  finally { btn.disabled = false; }
+}
+
+async function deleteSnapshot(id) {
+  if (!confirm('Delete snapshot ' + id + '?')) return;
+  try {
+    const r = await fetch('/api/debug/heap/delete?token=' + TOKEN + '&id=' + id, { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.message || r.statusText);
+    await loadList();
+  } catch(e) { setMsg(e.message, true); }
+}
+
+async function loadList() {
+  try {
+    const r = await fetch('/api/debug/heap/list?token=' + TOKEN);
+    if (!r.ok) return;
+    const list = await r.json();
+    const tbody = document.getElementById('snap-tbody');
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:#444;text-align:center;padding:20px">No snapshots yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(function(s, i) {
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td class="lbl">' + esc(s.label) + '</td>' +
+        '<td class="ts">' + fmtTime(s.takenAt) + '</td>' +
+        '<td class="sz">' + fmt(s.sizeBytes) + '</td>' +
+        '<td class="id">' + esc(s.id) + '</td>' +
+        '<td class="actions">' +
+          '<a href="/api/debug/heap/download?token=' + TOKEN + '&id=' + s.id + '" class="btn-sm" download>Download</a>' +
+          ' <button class="btn-sm btn-danger" onclick="deleteSnapshot(' + JSON.stringify(s.id) + ')">Delete</button>' +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  } catch(_) {}
+}
+
+function fmt(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function fmtTime(ms) {
+  return new Date(ms).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function setMsg(msg, isErr) {
+  var el = document.getElementById('msg');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : '';
+}
+
+loadList();
+refreshTimer = setInterval(loadList, 3000);
+</script>
+</body>
+</html>`;
 }
 
 // ─── Flame UI HTML ──────────────────────────────────────────────────────────
