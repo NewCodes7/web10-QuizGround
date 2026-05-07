@@ -43,7 +43,7 @@ jobs:
       - name: Node.js 설치
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: BE 의존성 설치
         working-directory: ./BE

@@ -14,7 +14,7 @@ echo "▶ WAS 배포 시작 ($(date '+%Y-%m-%d %H:%M:%S'))"
 # ── 1. Node.js 설치 확인 (최초 배포 시) ──────────────────────────
 if ! command -v node &>/dev/null; then
   echo "[SETUP] Node.js 20 설치 중..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
 echo "  Node.js: $(node -v)"
