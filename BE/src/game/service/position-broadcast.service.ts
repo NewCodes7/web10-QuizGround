@@ -157,7 +157,7 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    */
   private pendingBroadcasts = new Map<
     string,
-    Array<{ seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] }>
+    Array<{ seq: number; aliveMessages: PositionMessage[]; deadMessages: PositionMessage[] }>
   >();
 
   /** SHA1 of the loaded Lua script for EVALSHA. */
@@ -639,15 +639,12 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       `[writeRoom] done — gameId=${gameId} seq=${seq} batchSize=${batch.length} elapsed=${elapsed}ms`
     );
 
-    // TICKET-002: split alive / dead for the OUT phase
-    const aliveUpdates: PositionUpdate[] = [];
+    // TICKET-002: split alive / dead for the OUT phase ([x,y] conversion deferred to emit)
+    const aliveMessages: PositionMessage[] = [];
     const deadMessages: PositionMessage[] = [];
     for (const msg of batch) {
       if (msg.isAlive === SurvivalStatus.ALIVE) {
-        aliveUpdates.push({
-          playerId: msg.playerId,
-          playerPosition: [msg.positionX, msg.positionY]
-        });
+        aliveMessages.push(msg);
       } else {
         deadMessages.push(msg);
       }
@@ -656,9 +653,9 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
     // Buffer for the OUT timer
     const pending = this.pendingBroadcasts.get(gameId);
     if (pending) {
-      pending.push({ seq, aliveUpdates, deadMessages });
+      pending.push({ seq, aliveMessages, deadMessages });
     } else {
-      this.pendingBroadcasts.set(gameId, [{ seq, aliveUpdates, deadMessages }]);
+      this.pendingBroadcasts.set(gameId, [{ seq, aliveMessages, deadMessages }]);
     }
   }
 
@@ -692,23 +689,27 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
       return;
     }
 
-    const { seq, aliveUpdates, deadMessages } = this.mergeBatches(batches);
+    const { seq, aliveMessages, deadMessages } = this.mergeBatches(batches);
     const broadcastStart = Date.now();
 
-    if (aliveUpdates.length > 0) {
+    if (aliveMessages.length > 0) {
+      const updates = aliveMessages.map((m) => ({
+        playerId: m.playerId,
+        playerPosition: [m.positionX, m.positionY] as [number, number]
+      }));
       const socketIds = [...(this.playerSocketMap.get(gameId)?.values() ?? [])];
-      this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates: aliveUpdates });
+      this.server.to(socketIds).emit(SocketEvents.UPDATE_POSITION, { seq, updates });
     }
 
     if (deadMessages.length > 0) {
       this.broadcastToDeadPlayers(gameId, seq, deadMessages);
     }
 
-    const aliveIds = aliveUpdates.map((u) => u.playerId).join(',');
+    const aliveIds = aliveMessages.map((m) => m.playerId).join(',');
     const deadIds = deadMessages.map((m) => m.playerId).join(',');
     this.logger.debug(
       `[broadcastRoom] emit — gameId=${gameId} seq=${seq} mergedBatches=${batches.length} ` +
-        `alive=${aliveUpdates.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}]`
+        `alive=${aliveMessages.length}[${aliveIds}] dead=${deadMessages.length}[${deadIds}]`
     );
 
     const elapsed = Date.now() - broadcastStart;
@@ -727,20 +728,30 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
    * 결과 seq는 가장 마지막 배치의 값을 사용한다.
    */
   private mergeBatches(
-    batches: Array<{ seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] }>
-  ): { seq: number; aliveUpdates: PositionUpdate[]; deadMessages: PositionMessage[] } {
+    batches: Array<{ seq: number; aliveMessages: PositionMessage[]; deadMessages: PositionMessage[] }>
+  ): { seq: number; aliveMessages: PositionMessage[]; deadMessages: PositionMessage[] } {
+    if (batches.length === 1) {
+      return batches[0];
+    }
+
     const seq = batches[batches.length - 1].seq;
-    const aliveMap = new Map<string, PositionUpdate>();
+    const aliveMap = new Map<string, PositionMessage>();
     const deadMap = new Map<string, PositionMessage>();
     for (const batch of batches) {
-      for (const u of batch.aliveUpdates) {
+      for (const u of batch.aliveMessages) {
         aliveMap.set(u.playerId, u);
       }
       for (const m of batch.deadMessages) {
         deadMap.set(m.playerId, m);
       }
     }
-    return { seq, aliveUpdates: [...aliveMap.values()], deadMessages: [...deadMap.values()] };
+
+    const aliveMessages: PositionMessage[] = [];
+    const deadMessages: PositionMessage[] = [];
+    aliveMap.forEach((v) => aliveMessages.push(v));
+    deadMap.forEach((v) => deadMessages.push(v));
+
+    return { seq, aliveMessages, deadMessages };
   }
 
   /**
@@ -773,36 +784,26 @@ export class PositionBroadcastService implements OnApplicationShutdown, OnModule
   /** Lua-based atomic flush (TICKET-005). */
   private async execFlushLua(gameId: string, batch: PositionMessage[]): Promise<number> {
     const n = batch.length;
-    const playerKeys: string[] = new Array(n);
-    const posXArgs: string[] = new Array(n);
-    const posYArgs: string[] = new Array(n);
-    const isAliveArgs: string[] = new Array(n);
-    const playerIdArgs: string[] = new Array(n);
+
+    const keys: string[] = new Array(3 + n);
+    keys[0] = REDIS_KEY.ROOM_SEQ(gameId);
+    keys[1] = REDIS_KEY.POSITION_CHANNEL(gameId);
+    keys[2] = REDIS_KEY.ROOM_POSITION_LOG(gameId);
+
+    const args: string[] = new Array(3 + 4 * n);
+    args[0] = this.serverId;
+    args[1] = gameId;
+    args[2] = POSITION_HISTORY_SIZE.toString();
 
     for (let i = 0; i < n; i++) {
       const m = batch[i];
-      playerKeys[i] = REDIS_KEY.PLAYER(m.playerId);
-      posXArgs[i] = m.positionX.toString();
-      posYArgs[i] = m.positionY.toString();
-      isAliveArgs[i] = m.isAlive;
-      playerIdArgs[i] = m.playerId;
+      keys[3 + i]         = REDIS_KEY.PLAYER(m.playerId);
+      args[3 + i]         = m.positionX.toString();
+      args[3 + n + i]     = m.positionY.toString();
+      args[3 + 2 * n + i] = m.isAlive;
+      args[3 + 3 * n + i] = m.playerId;
     }
 
-    const keys = [
-      REDIS_KEY.ROOM_SEQ(gameId),
-      REDIS_KEY.POSITION_CHANNEL(gameId),
-      REDIS_KEY.ROOM_POSITION_LOG(gameId),
-      ...playerKeys
-    ];
-    const args = [
-      this.serverId,
-      gameId,
-      POSITION_HISTORY_SIZE.toString(),
-      ...posXArgs,
-      ...posYArgs,
-      ...isAliveArgs,
-      ...playerIdArgs
-    ];
     const result = await (this.redis as any).evalsha(this.luaSha, keys.length, ...keys, ...args);
     return result as number;
   }
