@@ -8,6 +8,7 @@ module.exports = {
       name: 'quiz-ground-was',
       script: 'dist/src/main.js',
       kill_timeout: 30000,
+      max_open_files: 65535,
       env: {
         ...dotenvVars,
         WAS_PORT: 1027,
