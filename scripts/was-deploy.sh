@@ -11,9 +11,10 @@ CURRENT_DIR="$DEPLOY_DIR/current"
 
 echo "▶ WAS 배포 시작 ($(date '+%Y-%m-%d %H:%M:%S'))"
 
-# ── 1. Node.js 설치 확인 (최초 배포 시) ──────────────────────────
-if ! command -v node &>/dev/null; then
-  echo "[SETUP] Node.js 20 설치 중..."
+# ── 1. Node.js 설치/업그레이드 확인 ──────────────────────────────
+NODE_MAJOR=$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
+if [ "$NODE_MAJOR" -lt 24 ]; then
+  echo "[SETUP] Node.js 24 설치/업그레이드 중... (현재: $(node -v 2>/dev/null || echo 없음))"
   curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
@@ -43,7 +44,8 @@ mkdir -p "$DEPLOY_DIR/tobe"  # 다음 배포를 위해 재생성
 # ── 5. PM2로 BE 실행 ──────────────────────────────────────────────
 # node_args(--heap-prof 등) 변경은 reload --update-env로 반영되지 않음
 # → delete + start로 항상 새 설정을 적용
-echo "[DEPLOY] PM2 프로세스 시작/재시작 중..."
+CPU_COUNT=$(nproc)
+echo "[DEPLOY] PM2 프로세스 시작/재시작 중... (CPU: ${CPU_COUNT}코어, instances=max)"
 cd "$CURRENT_DIR/BE"
 pm2 delete quiz-ground-was 2>/dev/null || true
 pm2 start ecosystem.config.js

@@ -53,7 +53,7 @@ class SocketService {
       this.socket = new mockMap[gameId as keyof typeof mockMap]() as SocketInterface;
     } else {
       // 소켓 연결
-      this.socket = io(this.url, { query: header, withCredentials: true, parser: msgpackParser }) as SocketInterface;
+      this.socket = io(this.url, { query: header, withCredentials: true, parser: msgpackParser, transports: ['websocket'] }) as SocketInterface;
     }
     this.initHandler();
     await new Promise<void>((resolve, reject) => {
